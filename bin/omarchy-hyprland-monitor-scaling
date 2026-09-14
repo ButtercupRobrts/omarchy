@@ -319,7 +319,12 @@ set_scale() {
 
   audit_scale_change "$requested" "$active_monitor" "$current_scale" "$new_scale" "$new_pos" "$audit_note"
 
-  persist_monitor_scale "$active_monitor" "$new_scale" "$new_gdk_scale" "$monitor_lua" \
+  # The persisted position rewrite only runs when the recompute actually
+  # moved the monitor; identical-to-live positions leave the rule untouched.
+  local position_update=""
+  [[ $new_x != $x || $new_y != $y ]] && position_update="${new_x}x${new_y}"
+
+  OMARCHY_NEW_POSITION="$position_update" persist_monitor_scale "$active_monitor" "$new_scale" "$new_gdk_scale" "$monitor_lua" \
     "$width" "$height" "$refresh_rate" "$new_x" "$new_y" "$description" "$make" "$model" "$serial" "$transform"
 }
 
@@ -372,6 +377,7 @@ persist_monitor_scale() {
         desc = ENVIRON["OMARCHY_TARGET_DESC"]
         short = ENVIRON["OMARCHY_TARGET_MAKE"] " " ENVIRON["OMARCHY_TARGET_MODEL"] " " ENVIRON["OMARCHY_TARGET_SERIAL"]
         new_scale = ENVIRON["OMARCHY_NEW_SCALE"]
+        new_position = ENVIRON["OMARCHY_NEW_POSITION"]
         squote = sprintf("%c", 39)
 
         # Hyprland compares a desc: selector against the monitor description
@@ -589,17 +595,42 @@ persist_monitor_scale() {
         return 0
       }
 
-      # Rewrites the top-level scale = key of the monitor table, or inserts one
-      # before the closing brace when the rule has none. Positions come from
-      # the string-blanked text; the splice lands in the original so comments
-      # and strings survive the edit.
-      function rewrite_scale(   kstart, vstart, vend, i, j, c, insertion) {
+      # In-place edits are collected as (start, end, replacement) spans whose
+      # offsets all come from the untouched block_nostr, then spliced into
+      # block_orig highest-offset-first. Splicing immediately would shift the
+      # block and invalidate every later span offset -- with position
+      # before scale in a rule, the scale splice would land on stale bytes.
+      # An insertion span carries end = start - 1 (empty range).
+      function add_edit(start, end, text) {
+        nedit++
+        edit_start[nedit] = start
+        edit_end[nedit] = end
+        edit_text[nedit] = text
+      }
+
+      function apply_edits(   i, j, best) {
+        for (i = 1; i <= nedit; i++) {
+          best = 0
+          for (j = 1; j <= nedit; j++)
+            if (edit_start[j] >= 0 && (best == 0 || edit_start[j] > edit_start[best])) best = j
+          if (best == 0) break
+          block_orig = substr(block_orig, 1, edit_start[best] - 1) edit_text[best] substr(block_orig, edit_end[best] + 1)
+          edit_start[best] = -1
+        }
+        nedit = 0
+      }
+
+      # The top-level scale = key of the monitor table, rewritten in place or
+      # inserted before the closing brace when the rule has none. Positions
+      # come from the string-blanked text; the splice lands in the original
+      # so comments and strings survive the edit.
+      function collect_scale_edit(   kstart, vstart, vend, i, j, c, insertion) {
         kstart = top_level_key("scale")
         if (kstart) {
           vstart = value_start(kstart)
           vend = value_end(vstart)
           while (vend > vstart && substr(block_nostr, vend, 1) ~ /[[:space:]]/) vend--
-          block_orig = substr(block_orig, 1, kstart - 1) "scale = " new_scale substr(block_orig, vend + 1)
+          add_edit(kstart, vend, "scale = " new_scale)
           return
         }
 
@@ -614,13 +645,37 @@ persist_monitor_scale() {
         } else {
           insertion = ", scale = " new_scale
         }
-        block_orig = substr(block_orig, 1, j) insertion substr(block_orig, j + 1)
+        add_edit(j + 1, j, insertion)
+      }
+
+      # The top-level position = key, rewritten to the recomputed literal. A
+      # missing position is auto-derived on every reload so it is never
+      # inserted, and an auto* value re-derives too, so only a literal or a
+      # variable reference can hold a stale coordinate. The value text is
+      # read from block_blank because block_nostr blanks string interiors.
+      function collect_position_edit(   kstart, vstart, vend, value) {
+        if (new_position == "") return
+        kstart = top_level_key("position")
+        if (!kstart) return
+        vstart = value_start(kstart)
+        vend = value_end(vstart)
+        while (vend > vstart && substr(block_nostr, vend, 1) ~ /[[:space:]]/) vend--
+        value = trim(substr(block_blank, vstart, vend - vstart + 1))
+        if (length(value) >= 2 &&
+            (substr(value, 1, 1) == "\"" || substr(value, 1, 1) == squote) &&
+            substr(value, length(value), 1) == substr(value, 1, 1))
+          value = trim(substr(value, 2, length(value) - 2))
+        if (value == "auto" || substr(value, 1, 5) == "auto-") return
+        add_edit(kstart, vend, "position = \"" new_position "\"")
       }
 
       function process_block() {
         if (selector_matches(block_output())) {
           matched++
-          rewrite_scale()
+          nedit = 0
+          collect_scale_edit()
+          collect_position_edit()
+          apply_edits()
         }
         print block_orig
       }

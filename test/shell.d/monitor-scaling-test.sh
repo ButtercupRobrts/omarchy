@@ -194,6 +194,56 @@ hl.monitor({ output = "", mode = "preferred", position = "auto", scale = 1 })
 LUA
 }
 
+# The named target carrying its live position before the scale key: both
+# fields are rewritten and the earlier position splice must not shift the
+# scale span's offsets.
+write_named_position_rule_config() {
+  cat >"$monitor_lua" <<'LUA'
+hl.monitor({ output = "HDMI-A-1", mode = "preferred", position = "-1200x0", scale = 1.6 })
+hl.monitor({ output = "", mode = "preferred", position = "auto", scale = 1 })
+LUA
+}
+
+# The reverse key order: the edit list must be safe in both directions.
+write_named_scale_first_rule_config() {
+  cat >"$monitor_lua" <<'LUA'
+hl.monitor({ output = "HDMI-A-1", mode = "preferred", scale = 1.6, position = "-1200x0" })
+hl.monitor({ output = "", mode = "preferred", position = "auto", scale = 1 })
+LUA
+}
+
+# An auto position re-derives on every reload, so nothing there can go stale
+# and the value is never rewritten.
+write_named_auto_position_config() {
+  cat >"$monitor_lua" <<'LUA'
+hl.monitor({ output = "HDMI-A-1", mode = "preferred", position = "auto", scale = 1.6 })
+hl.monitor({ output = "", mode = "preferred", position = "auto", scale = 1 })
+LUA
+}
+
+# A position that references a local is pinned to the recomputed literal
+# while the variable itself is left alone.
+write_named_var_position_config() {
+  cat >"$monitor_lua" <<'LUA'
+local omarchy_monitor_position = "-1200x0"
+hl.monitor({ output = "HDMI-A-1", mode = "preferred", position = omarchy_monitor_position, scale = 1.6 })
+hl.monitor({ output = "", mode = "preferred", position = "auto", scale = 1 })
+LUA
+}
+
+# A literal position inside a multi-line rule: the position and scale lines
+# are rewritten, every other line stays byte-identical.
+write_multiline_position_rule_config() {
+  cat >"$monitor_lua" <<'LUA'
+hl.monitor({
+  output = "HDMI-A-1",
+  mode = "preferred",
+  position = "-1200x0",
+  scale = 1.6
+})
+LUA
+}
+
 run_scaling() {
   HOME="$home_dir" \
     XDG_STATE_HOME="$home_dir/.local/state" \
@@ -519,6 +569,71 @@ grep -F 'scale = 2 ' "$eval_out" >/dev/null || fail "targeted stepping reads the
 grep -F 'position = "-960x0"' "$eval_out" >/dev/null || fail "targeted stepping keeps the adjacent edge touching"
 ! grep -F 'scale = 3 ' "$eval_out" >/dev/null || fail "targeted stepping does not step the focused monitor"
 pass "monitor scaling steps the named monitor's scale"
+
+# A named rule holding the live position gets both fields rewritten in place
+# with position before scale: the earlier position splice must not leave the
+# scale edit pointing at stale bytes.
+write_named_position_rule_config
+rm -f "$eval_out"
+OMARCHY_TEST_EXTERNAL_MONITOR=1 run_scaling 2.5 HDMI-A-1
+grep -Fx 'hl.monitor({ output = "HDMI-A-1", mode = "preferred", position = "-768x0", scale = 2.5 })' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling rewrites position and scale with position first"
+(( $(grep -c 'hl\.monitor' "$monitor_lua") == 2 )) ||
+  fail "monitor scaling rewrites position in place rather than appending"
+pass "monitor scaling rewrites position before scale in place"
+
+# The reverse key order must land identically: edits apply highest-offset-
+# first regardless of which key precedes the other.
+write_named_scale_first_rule_config
+rm -f "$eval_out"
+OMARCHY_TEST_EXTERNAL_MONITOR=1 run_scaling 2.5 HDMI-A-1
+grep -Fx 'hl.monitor({ output = "HDMI-A-1", mode = "preferred", scale = 2.5, position = "-768x0" })' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling rewrites position and scale with scale first"
+pass "monitor scaling rewrites scale before position in place"
+
+# An auto position re-derives on every reload, so the moved monitor's rule
+# keeps "auto" verbatim while the scale still lands.
+write_named_auto_position_config
+rm -f "$eval_out"
+OMARCHY_TEST_EXTERNAL_MONITOR=1 run_scaling 2.5 HDMI-A-1
+grep -Fx 'hl.monitor({ output = "HDMI-A-1", mode = "preferred", position = "auto", scale = 2.5 })' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling leaves an auto position verbatim"
+pass "monitor scaling never rewrites an auto position"
+
+# A variable-referencing position is pinned to the recomputed literal while
+# the variable itself stays byte-identical.
+write_named_var_position_config
+rm -f "$eval_out"
+OMARCHY_TEST_EXTERNAL_MONITOR=1 run_scaling 2.5 HDMI-A-1
+grep -Fx 'hl.monitor({ output = "HDMI-A-1", mode = "preferred", position = "-768x0", scale = 2.5 })' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling pins a variable position to the recomputed literal"
+grep -Fx 'local omarchy_monitor_position = "-1200x0"' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling leaves the position variable alone"
+pass "monitor scaling rewrites a variable position to a literal"
+
+# Inside a multi-line rule the position line is rewritten in place and every
+# other line stays byte-identical.
+write_multiline_position_rule_config
+rm -f "$eval_out"
+OMARCHY_TEST_EXTERNAL_MONITOR=1 run_scaling 2.5 HDMI-A-1
+grep -Fx '  position = "-768x0",' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling rewrites the position line inside a multi-line rule"
+grep -Fx '  scale = 2.5' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling rewrites the scale line inside a multi-line rule"
+grep -Fx '  output = "HDMI-A-1",' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling leaves the other lines of a multi-line rule alone"
+(( $(grep -c 'hl\.monitor' "$monitor_lua") == 1 )) ||
+  fail "monitor scaling rewrites a multi-line rule in place"
+pass "monitor scaling rewrites position inside a multi-line rule"
+
+# When the recompute lands on the live position the position text is never
+# churned: scaling 1.6 -> 1.6 keeps -1200x0 byte-identical.
+write_named_position_rule_config
+rm -f "$eval_out"
+OMARCHY_TEST_EXTERNAL_MONITOR=1 run_scaling 1.6 HDMI-A-1
+grep -Fx 'hl.monitor({ output = "HDMI-A-1", mode = "preferred", position = "-1200x0", scale = 1.6 })' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling does not churn an unchanged position"
+pass "monitor scaling leaves an unchanged position byte-identical"
 
 # A monitor arg absent from hyprctl fails before any eval or write.
 write_named_rule_config
