@@ -113,3 +113,75 @@ assertDeepEqual(
 
 assertDeepEqual(monitor.parseDisplays('{'), { displays: [], enabledDisplayCount: 0 }, 'monitor handles invalid display JSON')
 JS
+
+# Textual assertions over Panel.qml: own-screen targeting, argv shape, and the
+# header/row bindings can't run headless, so pin the invariants in the source.
+run_node_test <<'JS'
+const fs = require('fs')
+const panelQml = fs.readFileSync(path.join(root, 'shell/plugins/panels/monitor/Panel.qml'), 'utf8')
+
+assert(
+  panelQml.includes('root.QsWindow') &&
+    panelQml.includes('readonly property string ownScreenName'),
+  'monitor panel resolves its own screen from the hosting window'
+)
+
+const setScaleMatch = panelQml.match(/function setScale\(scale\) \{([\s\S]*?)\n  \}/)
+assert(setScaleMatch, 'monitor panel setScale function exists')
+assert(
+  setScaleMatch[1].includes('"omarchy-hyprland-monitor-scaling"'),
+  'monitor panel applies scale through the scaling CLI'
+)
+assert(
+  setScaleMatch[1].includes('ownScreenName'),
+  'monitor panel passes its own screen name to the scaling CLI'
+)
+assert(
+  setScaleMatch[1].includes('!actionProc.running'),
+  'monitor panel keeps the actionProc re-spawn guard'
+)
+assert(
+  !setScaleMatch[1].includes('"bash"') &&
+    !setScaleMatch[1].includes('"omarchy-hyprland-monitor-scaling '),
+  'monitor panel builds the scaling command as direct argv'
+)
+
+const scaleMonitorMatch = panelQml.match(/id: scaleMonitor[\s\S]*?anchors\.right: parent\.right/)
+assert(scaleMonitorMatch, 'monitor panel scaleMonitor header exists')
+assert(
+  scaleMonitorMatch[0].includes('root.ownScreenName') &&
+    scaleMonitorMatch[0].includes('root.ownScale'),
+  'monitor panel scale header names the hosting screen and its scale'
+)
+assert(
+  !scaleMonitorMatch[0].includes('root.focusedMonitor') &&
+    !scaleMonitorMatch[0].includes('enabledDisplayCount'),
+  'monitor panel scale header does not follow the focused monitor or display count'
+)
+assert(
+  scaleMonitorMatch[0].includes('visible: root.ownScreenName !== ""'),
+  'monitor panel scale header shows whenever the own screen is known'
+)
+
+const monitorRowTextMatch = panelQml.match(/text: monitorRow\.display\.name[^\n]*/)
+assert(monitorRowTextMatch, 'monitor row name binding exists')
+assert(
+  monitorRowTextMatch[0].includes('normalizeScale(monitorRow.display.scale)'),
+  'monitor row appends the display scale'
+)
+assert(
+  monitorRowTextMatch[0].includes('monitorRow.display.focused ? " · focused" : ""'),
+  'monitor row keeps the focused suffix'
+)
+assert(
+  monitorRowTextMatch[0].indexOf('normalizeScale(monitorRow.display.scale)') <
+    monitorRowTextMatch[0].indexOf('" · focused"'),
+  'monitor row renders name, scale, then focused'
+)
+
+assert(
+  panelQml.includes('Model.parseDisplays') &&
+    !panelQml.includes('"hyprctl", "monitors"'),
+  'monitor panel keeps a single displays-JSON path through omarchy-monitor-state'
+)
+JS
