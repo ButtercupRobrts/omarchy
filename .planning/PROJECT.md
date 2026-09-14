@@ -2,11 +2,22 @@
 
 ## What This Is
 
-A personal fork of Omarchy (`omacom/omarchy` → `ButtercupRobrts/omarchy`) used for developing fixes against the live system and potentially upstreaming them. Current focus: make per-monitor display scaling actually work — each screen's bar Display panel can see and set its own monitor's scale, and scale changes persist to the correct `hl.monitor()` line in `~/.config/hypr/monitors.lua` so they survive reboot.
+A personal fork of Omarchy (`omacom/omarchy` → `ButtercupRobrts/omarchy`) used for developing fixes against the live system and potentially upstreaming them. Current focus: transcode quality selection and size feedback in `omarchy-transcode`. Previously: per-monitor display scaling (v1.0, shipped — phases 1–3).
 
 ## Core Value
 
-A monitor scale change made from the bar or CLI must apply to the intended monitor and still be in effect after reboot — the current tool silently reverts it.
+A transcode invoked for sharing should let the user trade quality for size knowingly — pick a quality tier, see roughly how big the result will be, and get the actual size when it finishes — without slowing down the default path.
+
+## Current Milestone: v1.1 Transcode Quality & Size Feedback
+
+**Goal:** Let users pick output quality and see estimated file size when transcoding, without adding friction to the default path.
+
+**Target features:**
+- Video quality selection (mp4 CRF tiers, gif fps tiers) as a new menu step + 4th positional CLI arg; `medium` preserves today's exact flags
+- Estimated size as subtext on quality menu rows (ffprobe duration × bitrate table)
+- Actual output size in the completion notification
+- `defaultIndex` support in `omarchy-menu-select`/`Menu.qml` so `medium` is pre-highlighted
+- Filename suffix only for non-default quality
 
 ## Requirements
 
@@ -17,14 +28,16 @@ A monitor scale change made from the bar or CLI must apply to the intended monit
 - ✓ Display panel (`omarchy.monitor`) already has a SCALE section with preset pills — existing
 - ✓ Shell runs one bar instance per screen (`Variants { model: Quickshell.screens }`) — existing
 - ✓ `SUPER + /` / `SUPER + ALT + /` scaling keybindings exist — existing
+- ✓ REQ-01..05 — v1.0 per-monitor scaling requirements — shipped in phases 1–3 (see REQUIREMENTS.md traceability)
 
 ### Active
 
-- [ ] REQ-01 — Scale changes persist to the target monitor's own `hl.monitor()` line in `monitors.lua` (per-monitor persistence that survives reboot)
-- [ ] REQ-02 — Live scale apply preserves the monitor's configured position instead of forcing `position = "auto"`
-- [ ] REQ-03 — Each screen's bar Display panel can scale the monitor it sits on (own-screen targeting), not only the globally focused monitor
-- [ ] REQ-04 — DISPLAYS section shows each monitor's current scale (e.g. `HDMI-A-1 · 1.6x`)
-- [ ] REQ-05 — Single-monitor setups keep working with no regression
+- [ ] TRANSC-01 — Video transcode flow offers a quality step (high/medium/low); mp4 maps to CRF tiers, gif to fps tiers
+- [ ] TRANSC-02 — Quality selectable non-interactively as a 4th positional arg; `medium` (and omitted) reproduces current encoder flags exactly
+- [ ] TRANSC-03 — Quality menu rows show estimated output size as subtext (mp4); estimates are clearly approximate
+- [ ] TRANSC-04 — Completion notification reports the actual output file size
+- [ ] TRANSC-05 — `omarchy-menu-select` supports a pre-highlighted default row so `medium` is the Enter-default
+- [ ] TRANSC-06 — Pictures skip the quality step entirely (jpg/png flow unchanged); output filename gains a quality suffix only when non-default
 
 ### Out of Scope
 
@@ -77,4 +90,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-09-14 after initialization*
+*Last updated: 2026-09-15 after milestone v1.1 start*
