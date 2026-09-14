@@ -1,15 +1,15 @@
 #!/bin/bash
 
-# omarchy:summary=Show, set, or adjust focused Hyprland monitor scaling
-# omarchy:args=[up|down|SCALE]
-# omarchy:examples=omarchy hyprland monitor scaling | omarchy hyprland monitor scaling 1.6 | omarchy hyprland monitor scaling up | omarchy hyprland monitor scaling down
+# omarchy:summary=Show, set, or adjust Hyprland monitor scaling
+# omarchy:args=[up|down|SCALE] [monitor]
+# omarchy:examples=omarchy hyprland monitor scaling | omarchy hyprland monitor scaling 1.6 | omarchy hyprland monitor scaling up | omarchy hyprland monitor scaling down | omarchy hyprland monitor scaling 1.6 HDMI-A-1
 
 SCALES=(1 1.25 1.6 2 3 4)
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy"
 SCALE_LOG="$STATE_DIR/monitor-scaling.log"
 
 usage() {
-  echo "Usage: omarchy-hyprland-monitor-scaling [up|down|SCALE]"
+  echo "Usage: omarchy-hyprland-monitor-scaling [up|down|SCALE] [monitor]"
 }
 
 focused_monitor_scale() {
@@ -74,12 +74,24 @@ normalize_scale() {
 set_scale() {
   local requested_scale="$1"
   local requested="${2:-$requested_scale}"
-  local monitor_info="$(hyprctl monitors -j | jq -e -c '.[] | select(.focused == true)')"
+  local target_monitor="${3:-}"
+  local monitor_info
+  monitor_info=$(hyprctl monitors -j | jq -e -c --arg monitor "$target_monitor" '
+    .[] | select(if $monitor == "" then .focused == true else .name == $monitor end)') || {
+    echo "No such monitor: ${target_monitor:-focused}" >&2
+    exit 1
+  }
   local active_monitor="$(echo "$monitor_info" | jq -r '.name')"
   local current_scale="$(echo "$monitor_info" | jq -r '.scale')"
   local width="$(echo "$monitor_info" | jq -r '.width')"
   local height="$(echo "$monitor_info" | jq -r '.height')"
   local refresh_rate="$(echo "$monitor_info" | jq -r '.refreshRate')"
+  local x="$(echo "$monitor_info" | jq -r '.x // 0')"
+  local y="$(echo "$monitor_info" | jq -r '.y // 0')"
+  local description="$(echo "$monitor_info" | jq -r '.description // ""')"
+  local make="$(echo "$monitor_info" | jq -r '.make // ""')"
+  local model="$(echo "$monitor_info" | jq -r '.model // ""')"
+  local serial="$(echo "$monitor_info" | jq -r '.serial // ""')"
 
   # active_monitor is written into the Lua string eval'd below, so only a plain
   # connector name may pass; a hostile output name could execute otherwise.
@@ -94,22 +106,299 @@ set_scale() {
   local new_gdk_scale="$(awk -v scale="$new_scale" 'BEGIN { printf "%d", int(scale + 0.5) }')"
   local monitor_lua="$HOME/.config/hypr/monitors.lua"
 
-  hyprctl eval "hl.monitor({ output = \"$active_monitor\", mode = \"${width}x${height}@${refresh_rate}\", position = \"auto\", scale = $new_scale })" >/dev/null
+  # Replay the monitor's live position rather than "auto" so a runtime rule
+  # cannot clobber a configured layout like -1200x0 until the next reload.
+  hyprctl eval "hl.monitor({ output = \"$active_monitor\", mode = \"${width}x${height}@${refresh_rate}\", position = \"${x}x${y}\", scale = $new_scale })" >/dev/null
   audit_scale_change "$requested" "$active_monitor" "$current_scale" "$new_scale"
 
-  # Persist to monitors.lua if the user still has Omarchy's generic catch-all
-  # defaults, so the scale survives reboots.
-  if [[ -f $monitor_lua ]] && grep -q '^local omarchy_monitor_scale = ' "$monitor_lua"; then
-    sed -i -E \
-      -e "s|^local omarchy_monitor_scale = .*|local omarchy_monitor_scale = ${new_scale}|" \
-      -e "s|^local omarchy_gdk_scale = .*|local omarchy_gdk_scale = ${new_gdk_scale}|" \
-      "$monitor_lua"
-  elif [[ -f $monitor_lua ]] && grep -Eq '^hl\.monitor\(\{ output = "", mode = "preferred", position = "auto", scale = ("auto"|[0-9.]+) \}\)' "$monitor_lua"; then
-    sed -i -E \
-      -e "s|^(hl\.monitor\(\{ output = \"\", mode = \"preferred\", position = \"auto\", scale = )([^ ]+)( \}\))|\\1${new_scale}\\3|" \
-      -e 's|^hl\.env\("GDK_SCALE", ".*"\)|hl.env("GDK_SCALE", "'"$new_gdk_scale"'")|' \
-      "$monitor_lua"
+  persist_monitor_scale "$active_monitor" "$new_scale" "$new_gdk_scale" "$monitor_lua" \
+    "$width" "$height" "$refresh_rate" "$x" "$y" "$description" "$make" "$model" "$serial"
+}
+
+# Persist the scale on the target monitor's own hl.monitor() rule so it
+# survives reload and reboot. A monitor with a named rule gets its scale
+# rewritten in place (inserted when the rule has none); a monitor with no rule
+# gets an appended single-line rule, which beats the output = "" catch-all by
+# Hyprland's last-matching-rule semantics. The shared scale variable and the
+# catch-all are never written for a targeted monitor.
+persist_monitor_scale() {
+  local active_monitor="$1" new_scale="$2" new_gdk_scale="$3" monitor_lua="$4"
+  local width="$5" height="$6" refresh_rate="$7" x="$8" y="$9"
+  local description="${10}" make="${11}" model="${12}" serial="${13}"
+
+  if [[ ! -f $monitor_lua ]]; then
+    echo "$monitor_lua not found; skipping persistence" >&2
+    return 0
   fi
+  if [[ ! -r $monitor_lua ]]; then
+    echo "$monitor_lua is not readable; skipping persistence" >&2
+    return 1
+  fi
+
+  # A timestamped monitors.lua.bak.<timestamp> backup precedes every write so
+  # a bad rewrite never costs the user's file.
+  cp -- "$monitor_lua" "$monitor_lua.bak.$(date +%s)" || return 1
+
+  local tmp
+  tmp=$(mktemp) || return 1
+  # `local` itself resets $?, so status is declared up front and the awk exit is
+  # captured through || below.
+  local status=0
+
+  # Monitor identity travels through the environment, never -v: EDID-derived
+  # description text can carry backslashes that -v would eat. The awk pass
+  # blanks comments and string contents to spaces at identical byte offsets so
+  # neither can fake a key or a block boundary, then rewrites scale = inside
+  # every hl.monitor() block naming this output -- connector name or a desc:
+  # selector prefix-matching the monitor's description -- and answers through
+  # its exit code: 0 rewrote at least one block, 3 no rule names this output.
+  env OMARCHY_TARGET_NAME="$active_monitor" \
+    OMARCHY_TARGET_DESC="$description" \
+    OMARCHY_TARGET_MAKE="$make" \
+    OMARCHY_TARGET_MODEL="$model" \
+    OMARCHY_TARGET_SERIAL="$serial" \
+    OMARCHY_NEW_SCALE="$new_scale" \
+    awk '
+      BEGIN {
+        target = ENVIRON["OMARCHY_TARGET_NAME"]
+        desc = ENVIRON["OMARCHY_TARGET_DESC"]
+        short = ENVIRON["OMARCHY_TARGET_MAKE"] " " ENVIRON["OMARCHY_TARGET_MODEL"] " " ENVIRON["OMARCHY_TARGET_SERIAL"]
+        new_scale = ENVIRON["OMARCHY_NEW_SCALE"]
+        squote = sprintf("%c", 39)
+
+        # Hyprland compares a desc: selector against the monitor description
+        # and its "make model serial" short description, commas stripped.
+        gsub(/,/, "", desc)
+        gsub(/,/, "", short)
+        desc = trim(desc)
+        short = trim(short)
+
+        in_comment = 0   # inside a multi-line --[[ ]] comment
+        in_long = 0      # inside a [[ ]] long string
+        in_str = 0       # inside a quoted string (reset each line)
+        depth = 0
+        in_block = 0
+        matched = 0
+      }
+
+      function trim(s) {
+        sub(/^[[:space:]]+/, "", s)
+        sub(/[[:space:]]+$/, "", s)
+        return s
+      }
+
+      function sp(n,   s) {
+        s = ""
+        while (n > 0) { s = s " "; n-- }
+        return s
+      }
+
+      # Produces two shadows of the line in the globals b_out and s_out: b_out
+      # blanks comments (multi-line --[[ ]] regions tracked via in_comment) and
+      # s_out additionally blanks string contents. Both keep byte offsets
+      # aligned with $0 so positions found in them splice back into it.
+      function scan_line(line,   i, n, c, two) {
+        b_out = ""
+        s_out = ""
+        in_str = 0
+        n = length(line)
+        i = 1
+        while (i <= n) {
+          c = substr(line, i, 1)
+          two = substr(line, i, 2)
+          if (in_comment) {
+            if (two == "]]") {
+              b_out = b_out "  "; s_out = s_out "  "; in_comment = 0; i += 2
+            } else {
+              b_out = b_out " "; s_out = s_out " "; i++
+            }
+            continue
+          }
+          if (in_long) {
+            if (two == "]]") {
+              b_out = b_out "]]"; s_out = s_out "]]"; in_long = 0; i += 2
+            } else {
+              b_out = b_out c; s_out = s_out " "; i++
+            }
+            continue
+          }
+          if (in_str) {
+            if (c == "\\") {
+              b_out = b_out substr(line, i, 2)
+              s_out = s_out "  "
+              i += 2
+              continue
+            }
+            b_out = b_out c
+            if (c == quote) { s_out = s_out c; in_str = 0 } else { s_out = s_out " " }
+            i++
+            continue
+          }
+          if (two == "--") {
+            if (substr(line, i + 2, 2) == "[[") {
+              b_out = b_out "    "; s_out = s_out "    "; in_comment = 1; i += 4
+            } else {
+              b_out = b_out sp(n - i + 1); s_out = s_out sp(n - i + 1); i = n + 1
+            }
+            continue
+          }
+          if (two == "[[") {
+            b_out = b_out "[["; s_out = s_out "[["; in_long = 1; i += 2
+            continue
+          }
+          if (c == "\"" || c == squote) {
+            b_out = b_out c; s_out = s_out c; in_str = 1; quote = c; i++
+            continue
+          }
+          b_out = b_out c
+          s_out = s_out c
+          i++
+        }
+      }
+
+      function depth_delta(s,   i, n, d, c) {
+        d = 0
+        n = length(s)
+        for (i = 1; i <= n; i++) {
+          c = substr(s, i, 1)
+          if (c == "(" || c == "{") d++
+          else if (c == ")" || c == "}") d--
+        }
+        return d
+      }
+
+      # The output selector of the block, read from the comment-blanked text at
+      # offsets located in the string-blanked text so key-like text inside a
+      # string cannot pose as the output key.
+      function block_output(   q1, p, q2) {
+        if (!match(block_nostr, /[{,;[:space:]]output[[:space:]]*=[[:space:]]*"/)) return ""
+        q1 = RSTART + RLENGTH - 1
+        p = index(substr(block_nostr, q1 + 1), "\"")
+        if (p == 0) return ""
+        q2 = q1 + p
+        return substr(block_blank, q1 + 1, q2 - q1 - 1)
+      }
+
+      # Mirror of the Hyprland static selector: the literal connector name, or
+      # desc: followed by text that prefix-matches the monitor description or
+      # its "make model serial" short description. An empty output never
+      # matches, so the output = "" catch-all is never rewritten.
+      function selector_matches(value,   sel) {
+        if (value == target) return 1
+        if (substr(value, 1, 5) == "desc:") {
+          sel = substr(value, 6)
+          gsub(/,/, "", sel)
+          sel = trim(sel)
+          if (length(sel) == 0) return 0
+          if (substr(desc, 1, length(sel)) == sel) return 1
+          if (substr(short, 1, length(sel)) == sel) return 1
+        }
+        return 0
+      }
+
+      # Rewrites the first scale = key in the block, or inserts one before the
+      # closing brace of the table. Positions come from the string-blanked
+      # text; the splice lands in the original so comments and strings survive
+      # the edit.
+      function rewrite_scale(   kstart, vstart, vend, i, j, c, insertion) {
+        if (match(block_nostr, /[{,;[:space:]]scale[[:space:]]*=[[:space:]]*/)) {
+          kstart = RSTART + 1
+          vstart = RSTART + RLENGTH
+          if (match(substr(block_nostr, vstart), /[,;}]/)) {
+            vend = vstart + RSTART - 2
+          } else {
+            vend = length(block_nostr)
+          }
+          while (vend > vstart && substr(block_nostr, vend, 1) ~ /[[:space:]]/) vend--
+          block_orig = substr(block_orig, 1, kstart - 1) "scale = " new_scale substr(block_orig, vend + 1)
+          return
+        }
+
+        i = length(block_nostr)
+        while (i >= 1 && substr(block_nostr, i, 1) != "}") i--
+        if (i < 1) return
+        j = i - 1
+        while (j >= 1 && substr(block_nostr, j, 1) ~ /[[:space:]]/) j--
+        c = (j >= 1) ? substr(block_nostr, j, 1) : ""
+        if (c == "," || c == ";" || c == "{") {
+          insertion = " scale = " new_scale
+        } else {
+          insertion = ", scale = " new_scale
+        }
+        block_orig = substr(block_orig, 1, j) insertion substr(block_orig, j + 1)
+      }
+
+      function process_block() {
+        if (selector_matches(block_output())) {
+          matched++
+          rewrite_scale()
+        }
+        print block_orig
+      }
+
+      {
+        scan_line($0)
+
+        if (in_block) {
+          block_orig = block_orig "\n" $0
+          block_blank = block_blank "\n" b_out
+          block_nostr = block_nostr "\n" s_out
+          depth += depth_delta(s_out)
+          if (depth <= 0) { in_block = 0; depth = 0; process_block() }
+          next
+        }
+
+        if (depth == 0 && b_out ~ /hl\.monitor[[:space:]]*\(/) {
+          in_block = 1
+          block_orig = $0
+          block_blank = b_out
+          block_nostr = s_out
+          depth += depth_delta(s_out)
+          if (depth <= 0) { in_block = 0; depth = 0; process_block() }
+          next
+        }
+
+        depth += depth_delta(s_out)
+        if (depth < 0) depth = 0
+        print $0
+      }
+
+      END {
+        # An unterminated block is still user text: emit it verbatim.
+        if (in_block) print block_orig
+        exit(matched > 0 ? 0 : 3)
+      }
+    ' "$monitor_lua" >"$tmp" || status=$?
+
+  case $status in
+  0)
+    # cat through the target rather than mv so a symlinked config stays a
+    # symlink.
+    cat "$tmp" >"$monitor_lua"
+    ;;
+  3)
+    # A file that does not end in a newline would merge the append into its
+    # last line.
+    if [[ -s $monitor_lua ]] && [[ -n $(tail -c 1 "$monitor_lua") ]]; then
+      printf '\n' >>"$monitor_lua"
+    fi
+    printf 'hl.monitor({ output = "%s", mode = "%sx%s@%s", position = "%sx%s", scale = %s })\n' \
+      "$active_monitor" "$width" "$height" "$refresh_rate" "$x" "$y" "$new_scale" >>"$monitor_lua"
+    ;;
+  *)
+    echo "Failed to rewrite $monitor_lua; left unchanged" >&2
+    rm -f "$tmp"
+    return 1
+    ;;
+  esac
+  rm -f "$tmp"
+
+  # GTK only honors integer GDK_SCALE values; update whichever shipped form is
+  # present on every persist path. Each pattern no-ops when it is absent.
+  sed -i --follow-symlinks -E \
+    -e "s|^local omarchy_gdk_scale = .*|local omarchy_gdk_scale = ${new_gdk_scale}|" \
+    -e 's|^hl\.env\("GDK_SCALE", ".*"\)|hl.env("GDK_SCALE", "'"$new_gdk_scale"'")|' \
+    "$monitor_lua"
 }
 
 scale_from_current() {
@@ -171,30 +460,47 @@ scale_from_current() {
     }'
 }
 
+if (( $# > 2 )); then
+  usage >&2
+  exit 1
+fi
+
 case "${1:-}" in
 "")
+  if (( $# > 1 )); then
+    usage >&2
+    exit 1
+  fi
   focused_monitor_scale | normalize_scale
   ;;
 -h | --help)
   usage
   ;;
 up)
-  monitor_info=$(hyprctl monitors -j | jq -e -c '.[] | select(.focused == true)')
+  monitor_info=$(hyprctl monitors -j | jq -e -c --arg monitor "${2:-}" '
+    .[] | select(if $monitor == "" then .focused == true else .name == $monitor end)') || {
+    echo "No such monitor: ${2:-focused}" >&2
+    exit 1
+  }
   set_scale "$(echo "$monitor_info" | jq -r '.scale' | scale_from_current next \
-    "$(echo "$monitor_info" | jq -r '.width')" "$(echo "$monitor_info" | jq -r '.height')")" "up"
+    "$(echo "$monitor_info" | jq -r '.width')" "$(echo "$monitor_info" | jq -r '.height')")" "up" "${2:-}"
   ;;
 down)
-  monitor_info=$(hyprctl monitors -j | jq -e -c '.[] | select(.focused == true)')
+  monitor_info=$(hyprctl monitors -j | jq -e -c --arg monitor "${2:-}" '
+    .[] | select(if $monitor == "" then .focused == true else .name == $monitor end)') || {
+    echo "No such monitor: ${2:-focused}" >&2
+    exit 1
+  }
   set_scale "$(echo "$monitor_info" | jq -r '.scale' | scale_from_current previous \
-    "$(echo "$monitor_info" | jq -r '.width')" "$(echo "$monitor_info" | jq -r '.height')")" "down"
+    "$(echo "$monitor_info" | jq -r '.width')" "$(echo "$monitor_info" | jq -r '.height')")" "down" "${2:-}"
   ;;
 1 | 1.25 | 1.6 | 2 | 3 | 4)
-  set_scale "$1" "$1"
+  set_scale "$1" "$1" "${2:-}"
   ;;
 *)
   if [[ $1 =~ ^[0-9]+([.][0-9]+)?$ ]] &&
     awk -v scale="$1" 'BEGIN { exit !(scale >= 1 && scale <= 4) }'; then
-    set_scale "$1" "$1"
+    set_scale "$1" "$1" "${2:-}"
   else
     usage >&2
     exit 1

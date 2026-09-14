@@ -19,8 +19,20 @@ cat >"$stub_bin/hyprctl" <<'SH'
 #!/bin/bash
 
 if [[ $1 == "monitors" && $2 == "-j" ]]; then
-  printf '[{"name":"eDP-1","focused":true,"scale":%s,"width":%s,"height":%s,"refreshRate":120.0}]' \
-    "${OMARCHY_TEST_MONITOR_SCALE:-2}" "${OMARCHY_TEST_MONITOR_WIDTH:-2880}" "${OMARCHY_TEST_MONITOR_HEIGHT:-1800}"
+  internal=$(printf '{"name":"eDP-1","focused":true,"scale":%s,"width":%s,"height":%s,"refreshRate":120.0,"x":0,"y":0,"description":"%s","make":"%s","model":"%s","serial":"%s"}' \
+    "${OMARCHY_TEST_MONITOR_SCALE:-2}" \
+    "${OMARCHY_TEST_MONITOR_WIDTH:-2880}" \
+    "${OMARCHY_TEST_MONITOR_HEIGHT:-1800}" \
+    "${OMARCHY_TEST_MONITOR_DESCRIPTION:-BOE NE180WUM}" \
+    "${OMARCHY_TEST_MONITOR_MAKE:-BOE}" \
+    "${OMARCHY_TEST_MONITOR_MODEL:-NE180WUM}" \
+    "${OMARCHY_TEST_MONITOR_SERIAL:-0x00000001}")
+  if [[ ${OMARCHY_TEST_EXTERNAL_MONITOR:-0} == "1" ]]; then
+    printf '[%s,%s]' "$internal" \
+      '{"name":"HDMI-A-1","focused":false,"scale":1.6,"width":1920,"height":1080,"refreshRate":144.0,"x":-1200,"y":0,"description":"Samsung C27JG5x","make":"Samsung","model":"C27JG5x","serial":"H4ZM800123"}'
+  else
+    printf '[%s]' "$internal"
+  fi
 elif [[ $1 == "eval" ]]; then
   printf '%s\n' "$2" >"$OMARCHY_TEST_HYPRCTL_EVAL_OUT"
 else
@@ -36,38 +48,70 @@ local omarchy_monitor_scale = 2
 LUA
 }
 
+# The shipped pairing: the generic catch-all handing omarchy_monitor_scale to
+# unlisted outputs, plus a named rule for the internal panel. Persistence must
+# rewrite the named rule in place and leave the catch-all and variable alone.
+write_named_rule_config() {
+  cat >"$monitor_lua" <<'LUA'
+local omarchy_gdk_scale = 2
+local omarchy_monitor_scale = 2
+hl.monitor({ output = "", mode = "preferred", position = "auto", scale = omarchy_monitor_scale })
+hl.monitor({ output = "eDP-1", mode = "preferred", position = "auto", scale = 1.5 })
+LUA
+}
+
 run_scaling() {
   HOME="$home_dir" \
     XDG_STATE_HOME="$home_dir/.local/state" \
     PATH="$stub_bin:$PATH" \
     OMARCHY_TEST_HYPRCTL_EVAL_OUT="$eval_out" \
     OMARCHY_TEST_MONITOR_SCALE="${OMARCHY_TEST_MONITOR_SCALE:-2}" \
+    OMARCHY_TEST_MONITOR_DESCRIPTION="${OMARCHY_TEST_MONITOR_DESCRIPTION:-}" \
+    OMARCHY_TEST_MONITOR_MAKE="${OMARCHY_TEST_MONITOR_MAKE:-}" \
+    OMARCHY_TEST_MONITOR_MODEL="${OMARCHY_TEST_MONITOR_MODEL:-}" \
+    OMARCHY_TEST_MONITOR_SERIAL="${OMARCHY_TEST_MONITOR_SERIAL:-}" \
+    OMARCHY_TEST_EXTERNAL_MONITOR="${OMARCHY_TEST_EXTERNAL_MONITOR:-0}" \
     "$ROOT/bin/omarchy-hyprland-monitor-scaling" "$@"
 }
 
 write_monitor_config
 OMARCHY_TEST_MONITOR_SCALE=2 run_scaling up
 grep -F 'scale = 3' "$eval_out" >/dev/null || fail "monitor scaling up reaches 3x"
-grep -Fx 'local omarchy_monitor_scale = 3' "$monitor_lua" >/dev/null || fail "monitor scaling up persists 3x"
+grep -F 'position = "0x0"' "$eval_out" >/dev/null || fail "monitor scaling up keeps the live position"
+! grep -F 'position = "auto"' "$eval_out" >/dev/null || fail "monitor scaling up never emits auto position"
+grep -Fx 'hl.monitor({ output = "eDP-1", mode = "2880x1800@120.0", position = "0x0", scale = 3 })' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling up persists 3x on an appended eDP-1 rule"
+grep -Fx 'local omarchy_monitor_scale = 2' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling up leaves the shared scale variable alone"
 grep -F $'requested=up\tcurrent=2\tnew=3\tmonitor=eDP-1' "$scale_log" >/dev/null || fail "monitor scaling up writes audit log"
 pass "monitor scaling up reaches 3x"
 
 write_monitor_config
 OMARCHY_TEST_MONITOR_SCALE=3 run_scaling down
 grep -F 'scale = 2' "$eval_out" >/dev/null || fail "monitor scaling down recovers 3x to 2x"
-grep -Fx 'local omarchy_monitor_scale = 2' "$monitor_lua" >/dev/null || fail "monitor scaling down persists 2x from 3x"
+grep -F 'position = "0x0"' "$eval_out" >/dev/null || fail "monitor scaling down keeps the live position"
+grep -Fx 'hl.monitor({ output = "eDP-1", mode = "2880x1800@120.0", position = "0x0", scale = 2 })' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling down persists 2x from 3x"
+grep -Fx 'local omarchy_monitor_scale = 2' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling down leaves the shared scale variable alone"
 pass "monitor scaling down recovers 3x to 2x"
 
 write_monitor_config
 OMARCHY_TEST_MONITOR_SCALE=3.0000000000000004 run_scaling down
 grep -F 'scale = 2' "$eval_out" >/dev/null || fail "monitor scaling down snaps floating point 3x to 2x"
-grep -Fx 'local omarchy_monitor_scale = 2' "$monitor_lua" >/dev/null || fail "monitor scaling down persists 2x from floating point 3x"
+grep -Fx 'hl.monitor({ output = "eDP-1", mode = "2880x1800@120.0", position = "0x0", scale = 2 })' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling down persists 2x from floating point 3x"
+grep -Fx 'local omarchy_monitor_scale = 2' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling down leaves the shared scale variable alone"
 pass "monitor scaling down snaps floating point 3x to 2x"
 
 write_monitor_config
 OMARCHY_TEST_MONITOR_SCALE=2 run_scaling 3
 grep -F 'scale = 3' "$eval_out" >/dev/null || fail "monitor scaling explicit 3x remains available"
-grep -Fx 'local omarchy_monitor_scale = 3' "$monitor_lua" >/dev/null || fail "monitor scaling explicit 3x persists"
+grep -Fx 'hl.monitor({ output = "eDP-1", mode = "2880x1800@120.0", position = "0x0", scale = 3 })' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling explicit 3x persists"
+grep -Fx 'local omarchy_monitor_scale = 2' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling explicit 3x leaves the shared scale variable alone"
 grep -Fx 'local omarchy_gdk_scale = 3' "$monitor_lua" >/dev/null || fail "monitor scaling explicit 3x persists GDK scale"
 pass "monitor scaling explicit 3x remains available"
 
@@ -76,13 +120,15 @@ pass "monitor scaling explicit 3x remains available"
 write_monitor_config
 OMARCHY_TEST_MONITOR_SCALE=2 run_scaling 1.6
 grep -F 'scale = 1.6' "$eval_out" >/dev/null || fail "monitor scaling explicit 1.6x remains available"
-grep -Fx 'local omarchy_monitor_scale = 1.6' "$monitor_lua" >/dev/null || fail "monitor scaling explicit 1.6x persists"
+grep -Fx 'hl.monitor({ output = "eDP-1", mode = "2880x1800@120.0", position = "0x0", scale = 1.6 })' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling explicit 1.6x persists"
 grep -Fx 'local omarchy_gdk_scale = 2' "$monitor_lua" >/dev/null || fail "monitor scaling 1.6x persists integer GDK scale 2"
 pass "monitor scaling 1.6x persists integer GDK scale 2"
 
 write_monitor_config
 OMARCHY_TEST_MONITOR_SCALE=2 run_scaling 1.25
-grep -Fx 'local omarchy_monitor_scale = 1.25' "$monitor_lua" >/dev/null || fail "monitor scaling explicit 1.25x persists"
+grep -Fx 'hl.monitor({ output = "eDP-1", mode = "2880x1800@120.0", position = "0x0", scale = 1.25 })' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling explicit 1.25x persists"
 grep -Fx 'local omarchy_gdk_scale = 1' "$monitor_lua" >/dev/null || fail "monitor scaling 1.25x persists integer GDK scale 1"
 pass "monitor scaling 1.25x persists integer GDK scale 1"
 
@@ -98,7 +144,7 @@ pass "monitor scaling reports the actual non-preset scale"
 write_monitor_config
 OMARCHY_TEST_MONITOR_SCALE=2 OMARCHY_TEST_MONITOR_WIDTH=1280 OMARCHY_TEST_MONITOR_HEIGHT=800 run_scaling 3
 grep -F 'scale = 3.2' "$eval_out" >/dev/null || fail "monitor scaling approximates explicit 3x as 3.2x"
-grep -Fx 'local omarchy_monitor_scale = 3.2' "$monitor_lua" >/dev/null ||
+grep -Fx 'hl.monitor({ output = "eDP-1", mode = "1280x800@120.0", position = "0x0", scale = 3.2 })' "$monitor_lua" >/dev/null ||
   fail "monitor scaling persists approximated 3.2x"
 pass "monitor scaling approximates explicit 3x as 3.2x"
 
@@ -126,6 +172,24 @@ pass "monitor scaling accepts displayed approximate values"
 write_monitor_config
 OMARCHY_TEST_MONITOR_SCALE=4 OMARCHY_TEST_MONITOR_WIDTH=1280 OMARCHY_TEST_MONITOR_HEIGHT=804 run_scaling down
 grep -F 'scale = 2' "$eval_out" >/dev/null || fail "monitor scaling down skips duplicate 4x approximation"
-grep -Fx 'local omarchy_monitor_scale = 2' "$monitor_lua" >/dev/null ||
+grep -Fx 'hl.monitor({ output = "eDP-1", mode = "1280x804@120.0", position = "0x0", scale = 2 })' "$monitor_lua" >/dev/null ||
   fail "monitor scaling down persists 2x after skipping duplicate approximation"
+grep -Fx 'local omarchy_monitor_scale = 2' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling down leaves the shared scale variable alone"
 pass "monitor scaling down skips duplicate approximation"
+
+# A monitor with its own hl.monitor() rule gets the scale rewritten in place:
+# no appended line, and neither the catch-all nor the variable is touched.
+write_named_rule_config
+run_scaling 2
+grep -F 'position = "0x0"' "$eval_out" >/dev/null || fail "monitor scaling a named rule keeps the live position"
+! grep -F 'position = "auto"' "$eval_out" >/dev/null || fail "monitor scaling a named rule never emits auto position"
+grep -Fx 'hl.monitor({ output = "eDP-1", mode = "preferred", position = "auto", scale = 2 })' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling rewrites the monitor's own rule in place"
+(( $(grep -c 'hl\.monitor' "$monitor_lua") == 2 )) ||
+  fail "monitor scaling rewrites in place rather than appending a second rule"
+grep -Fx 'hl.monitor({ output = "", mode = "preferred", position = "auto", scale = omarchy_monitor_scale })' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling leaves the catch-all rule untouched"
+grep -Fx 'local omarchy_monitor_scale = 2' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling leaves the shared scale variable alone"
+pass "monitor scaling rewrites the monitor's own hl.monitor rule"
