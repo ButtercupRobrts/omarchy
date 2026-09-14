@@ -318,6 +318,27 @@ grep -Fx 'hl.monitor({ output = "eDP-1", mode = "2880x1800@120.0", position = "0
 grep -Fx 'local omarchy_gdk_scale = 1' "$monitor_lua" >/dev/null || fail "monitor scaling 1.25x persists integer GDK scale 1"
 pass "monitor scaling 1.25x persists integer GDK scale 1"
 
+# GDK_SCALE follows the densest monitor, not the scaled one: downscaling
+# HDMI-A-1 to 1.25 leaves eDP-1's 2 as the max, where the old target-derived
+# value would have written 1.
+write_monitor_config
+rm -f "$eval_out"
+OMARCHY_TEST_EXTERNAL_MONITOR=1 run_scaling 1.25 HDMI-A-1
+grep -Fx 'local omarchy_gdk_scale = 2' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling keeps GDK_SCALE at the densest monitor's scale"
+pass "monitor scaling derives GDK_SCALE from the densest monitor"
+
+# With every monitor at or below 1.25 the max rounds half up to 1. The HDMI
+# right edge (-80) sits 80px clear of eDP-1's left edge, so the recompute
+# leaves both positions untouched and quiet.
+write_monitor_config
+rm -f "$eval_out"
+OMARCHY_TEST_MONITORS_JSON='[{"name":"eDP-1","focused":true,"scale":1.25,"width":2880,"height":1800,"refreshRate":120.0,"x":0,"y":0,"transform":0},{"name":"HDMI-A-1","focused":false,"scale":1,"width":1920,"height":1080,"refreshRate":144.0,"x":-2000,"y":0,"transform":0}]' \
+  run_scaling 1.25 eDP-1
+grep -Fx 'local omarchy_gdk_scale = 1' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling rounds a sub-1.5 max GDK_SCALE to 1"
+pass "monitor scaling rounds the max monitor scale for GDK_SCALE"
+
 scale=$(OMARCHY_TEST_MONITOR_SCALE=3 run_scaling)
 [[ $scale == "3" ]] || fail "monitor scaling reports explicit 3x scale" "actual: $scale"
 pass "monitor scaling reports explicit 3x scale"

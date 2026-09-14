@@ -271,8 +271,11 @@ set_scale() {
 
   local new_scale="$(clean_scale "$requested_scale" "$width" "$height")"
   # GTK only honors integer GDK_SCALE values, so persist the nearest whole
-  # factor even when the monitor scale itself is fractional.
-  local new_gdk_scale="$(awk -v scale="$new_scale" 'BEGIN { printf "%d", int(scale + 0.5) }')"
+  # factor even when the monitor scale itself is fractional. The global
+  # follows the densest monitor: the target's new scale plus every other
+  # monitor's reported scale, rounded half up.
+  local new_gdk_scale="$(printf '%s\n' "$monitors_json" | jq -r --arg name "$active_monitor" --argjson new "$new_scale" \
+    '[.[] | select(.name != $name) | .scale] + [$new] | max' | awk '{ printf "%d", int($1 + 0.5) }')"
   local monitor_lua="$HOME/.config/hypr/monitors.lua"
 
   # The scale change resizes the monitor's logical box, so the position is
