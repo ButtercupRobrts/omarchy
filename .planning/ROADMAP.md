@@ -49,11 +49,12 @@ Plans:
   3. A scale change made from the panel persists to the correct monitor's `hl.monitor()` line and survives reload/reboot (via the Phase 1 CLI)
   4. Single-monitor setups still work — the scale row functions and the panel behaves as before
 
-**Plans**: 1 plan
+**Plans**: 1/1 plans executed
 
 Plans:
 
-- [ ] 02-01: Per-bar monitor targeting for SCALE pills plus per-monitor scale display in the DISPLAYS section
+- [x] 02-01-PLAN.md
+- [x] 02-01: Per-bar monitor targeting for SCALE pills plus per-monitor scale display in the DISPLAYS section
 
 ## Progress
 
@@ -63,4 +64,4 @@ Phases execute in numeric order: 1 → 2
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Per-monitor scale persistence in the scaling CLI | 1/1 | In Progress|  |
-| 2. Per-monitor Display panel | 0/1 | Not started | - |
+| 2. Per-monitor Display panel | 1/1 | In Progress | - |

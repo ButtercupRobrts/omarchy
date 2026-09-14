@@ -16,9 +16,9 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Bar Panel
 
-- [ ] **SCALE-05**: The Display panel on each screen's bar shows and targets that screen's own monitor for SCALE pills (per-bar monitor targeting)
-- [ ] **SCALE-06**: The DISPLAYS section shows each monitor's current scale alongside its name
-- [ ] **SCALE-07**: The panel behaves correctly with a single monitor (scale row works, no DISPLAYS section needed)
+- [x] **SCALE-05**: The Display panel on each screen's bar shows and targets that screen's own monitor for SCALE pills (per-bar monitor targeting)
+- [x] **SCALE-06**: The DISPLAYS section shows each monitor's current scale alongside its name
+- [x] **SCALE-07**: The panel behaves correctly with a single monitor (scale row works, no DISPLAYS section needed)
 
 ## v2 Requirements
 
@@ -47,9 +47,9 @@ Deferred to future release. Tracked but not in current roadmap.
 | SCALE-02 | Phase 1 | Complete |
 | SCALE-03 | Phase 1 | Complete |
 | SCALE-04 | Phase 1 | Complete |
-| SCALE-05 | Phase 2 | Pending |
-| SCALE-06 | Phase 2 | Pending |
-| SCALE-07 | Phase 2 | Pending |
+| SCALE-05 | Phase 2 | Complete |
+| SCALE-06 | Phase 2 | Complete |
+| SCALE-07 | Phase 2 | Complete |
 
 **Coverage:**
 

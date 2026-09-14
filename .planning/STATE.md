@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 2
 current_phase_name: Per-monitor Display panel
 status: executing
-stopped_at: Completed 01-01-PLAN.md
-last_updated: "2026-09-14T13:20:16.142Z"
+stopped_at: Completed 02-01-PLAN.md
+last_updated: "2026-09-14T13:46:00.000Z"
 last_activity: 2026-09-14
-last_activity_desc: Phase 1 marked complete
-state_head: b110bc8207435659ff42a1c3dbca2f4d3954d1d1
+last_activity_desc: Executed 02-01 — per-monitor panel targeting and per-display scale
+state_head: 3ef451b71e332660ebc0e2e14b363e23829ccf48
 progress:
   total_phases: 2
   completed_phases: 0
   total_plans: 2
-  completed_plans: 1
+  completed_plans: 2
   percent: 0
 ---
 
@@ -23,14 +23,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-14)
 
 **Core value:** A monitor scale change made from the bar or CLI must apply to the intended monitor and still be in effect after reboot.
-**Current focus:** Phase 1 — Per-monitor scale persistence in the scaling CLI
+**Current focus:** Phase 2 — Per-monitor Display panel
 
 ## Current Position
 
-Phase: 2 (Per-monitor Display panel) — READY TO EXECUTE
-Plan: 1 of 1 in current phase (01-01 executed, summarized, committed)
-Status: Ready to execute
-Last activity: 2026-09-14 — Phase 1 marked complete
+Phase: 2 (Per-monitor Display panel) — EXECUTION COMPLETE
+Plan: 1 of 1 in current phase (02-01 executed, summarized, committed)
+Status: Phase 2 plans done — ready for /gsd-verify-work 2 and milestone close
+Last activity: 2026-09-14 — Executed 02-01: per-monitor panel targeting and per-display scale
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -38,19 +38,20 @@ Progress: [░░░░░░░░░░] 0%
 
 **Velocity:**
 
-- Total plans completed: 1
-- Average duration: 23 min
-- Total execution time: 0.4 hours
+- Total plans completed: 2
+- Average duration: 24 min
+- Total execution time: 0.8 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 1 | 1 | 23 min | 23 min |
+| 2 | 1 | 24 min | 24 min |
 
 **Recent Trend:**
 
-- Last 5 plans: P01 (23 min)
+- Last 5 plans: P01 (23 min), P02 (24 min)
 - Trend: -
 
 *Updated after each plan completion*
@@ -59,6 +60,7 @@ Progress: [░░░░░░░░░░] 0%
 | Plan | Duration | Tasks | Files |
 |------|----------|-------|-------|
 | Phase 1 P01 | 23 min | 4 tasks | 2 files |
+| Phase 2 P01 | 24 min | 4 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -72,6 +74,8 @@ Recent decisions affecting current work:
 - [Init]: Panel reads `hyprctl monitors -j` itself for per-display scale rather than rewriting `omarchy-monitor-state`'s positional contract
 - [Phase 1]: Per-monitor persistence: the target monitor's own hl.monitor() rule is the system of record (in-place rewrite or single-line append); the shared omarchy_monitor_scale variable and output="" catch-all are never written for a targeted monitor — awk rewriter blanks comments and string contents at stable byte offsets, matches output by name or desc: prefix against description/make-model-serial, splices scale into original text; exit 0 rewrote, 3 append; identity via ENVIRON never -v
 - [Phase 2]: Per-display scale via omarchy-monitor-state displays JSON 'scale' field (additive, positional contract untouched) — supersedes init decision for a separate hyprctl Process
+- [Phase 2]: Own-screen identity via bound QsWindow attached property (ownWindow/ownScreenName) with parallel ownDisplay()/ownScale — focusedMonitor/monitorScale keep focused semantics for brightness argv and stateIpc, never repurposed
+- [Phase 2]: setScale uses direct argv (no bash -c), appending ownScreenName only when non-empty; SCALE header reads `ownScreenName · ownScalex` ungated by display count (D-03); DISPLAYS rows append `· N.Nx` gated on enabled + non-empty normalization (D-01); non-preset current scale surfaces via Model.scalesWithCurrent sorted-insert pill (D-04)
 
 ### Pending Todos
 
@@ -79,9 +83,11 @@ None yet.
 
 ### Blockers/Concerns
 
-- Phase 2 depends on Phase 1: the panel must call a CLI that persists correctly
-- `./test/shell` has 7 pre-existing environmental failures (bar-icon-geometry, config, locate, runtime-smoke, screenshot-sanity, snapper, unowned-system-paths) — all reproduce at base commit 41b7ea3d in a clean worktree; unrelated to Phase 1 changes
-- Focused suites green: monitor-scaling (30 cases), monitor-state, monitor-clamshell-scale, monitor-output-name; `./test/cli` exit 0
+- Phase 2 depends on Phase 1: the panel must call a CLI that persists correctly — satisfied; the panel now invokes `omarchy-hyprland-monitor-scaling <SCALE> [monitor]`
+- `./test/shell` has 7 pre-existing environmental failures (bar-icon-geometry, config, locate, runtime-smoke, screenshot-sanity, snapper, unowned-system-paths) — all reproduce at base commit 41b7ea3d in a clean worktree; still the only failures after 02-01
+- Focused suites green: monitor-scaling (36 cases), monitor-state, monitor-test (42 assertions incl. textual QML pins); `./test/cli` exit 0
+- Running-UI visual verification of own-screen targeting is pending user UAT (checklist in 02-01-SUMMARY.md) — the dev shell loads the packaged /usr/share/omarchy tree, so it was documented, not executed
+- Housekeeping for phase transition: the stale REQUIREMENTS.md Out-of-Scope row ("Panel reads `hyprctl monitors -j` itself") is superseded by D-06
 
 ## Deferred Items
 
@@ -93,6 +99,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-14T10:13:17.835Z
-Stopped at: Completed 01-01-PLAN.md
+Last session: 2026-09-14T13:46:00.000Z
+Stopped at: Completed 02-01-PLAN.md
 Resume file: None
