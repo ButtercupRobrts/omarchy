@@ -37,7 +37,9 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 **Canonical refs:** `.planning/research/ARCHITECTURE.md`, `.planning/research/PITFALLS.md` (pitfall 2), `bin/omarchy-menu-select`, `shell/plugins/menu/Menu.qml`
 
-**Plans**: 0 plans
+**Plans**: 1 plan
+
+- [ ] 04-01-PLAN.md — `--default-index` post-`--` flag → `defaultIndex` payload field → `openDmenu` pre-highlight via `MenuModel.dmenuDefaultIndex`, with stub e2e + node coverage and docs
 
 ### Phase 5: Non-interactive quality in `omarchy-transcode`
 
@@ -104,7 +106,7 @@ Phases execute in numeric order: 4 → 5 → 6 → 7 (4 and 5 are independent; 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 4. Menu `defaultIndex` plumbing | 0/0 | Pending |  |
+| 4. Menu `defaultIndex` plumbing | 0/1 | Pending |  |
 | 5. Non-interactive quality in `omarchy-transcode` | 0/0 | Pending |  |
 | 6. Interactive quality prompt + size estimates | 0/0 | Pending |  |
 | 7. Completion-size notification + docs | 0/0 | Pending |  |
