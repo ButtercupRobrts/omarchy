@@ -37,7 +37,7 @@ Deferred to future release. Tracked but not in current roadmap.
 | Brightness controls in the panel | Already functional — not part of this fix |
 | Screensaver scale/art fixes | Unrelated upstream issues #9027, #7307 |
 | Building on PR #11414 branch | Independent implementation for a clean, standalone change |
-| Rewriting `omarchy-monitor-state` positional contract | Panel reads `hyprctl monitors -j` itself for per-display scale; avoids destabilizing the 8-line contract other consumers may parse |
+| Rewriting `omarchy-monitor-state` positional contract | Superseded by Phase 2 D-06 — the panel gets per-display scale from an additive `scale` field inside the line-7 JSON; the 8-line contract stays byte-stable (line count/order unchanged) |
 
 ## Traceability
 
