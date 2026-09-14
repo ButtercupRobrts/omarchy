@@ -65,3 +65,21 @@ Phases execute in numeric order: 1 → 2
 |-------|----------------|--------|-----------|
 | 1. Per-monitor scale persistence in the scaling CLI | 1/1 | In Progress|  |
 | 2. Per-monitor Display panel | 1/1 | In Progress | - |
+
+### Phase 3: Scale-aware monitor position adjustment
+
+**Goal**: `omarchy-hyprland-monitor-scaling` recomputes the target monitor's position on scale change so edge-adjacent monitors stay adjacent — no new overlaps, no dead gaps that trap the cursor — persists the corrected position to `monitors.lua`, and makes `GDK_SCALE` track the maximum monitor scale instead of the last-scaled monitor's
+**Depends on**: Phase 2
+**Requirements**: SCALE-08, SCALE-09, SCALE-10
+**Success Criteria** (what must be TRUE):
+
+  1. Rescaling an edge-adjacent monitor keeps it touching its neighbor — e.g. Samsung `HDMI-A-1` at `-1200x0` scale 1.6 → scale 1.5 lands at `-1280x0`, no overlap warning, cursor can still cross
+  2. Rescaling a floating monitor either preserves its position exactly or minimally clamps it only when the growth would create a new overlap — deliberate gaps are never silently normalized
+  3. The recomputed position is written to the target monitor's `hl.monitor()` rule and survives `hyprctl reload`
+  4. `omarchy_gdk_scale` reflects `round(max(all monitor scales))` after any scale change, so scaling a secondary monitor cannot degrade XWayland sharpness on a denser primary
+
+**Plans**: 0 plans
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 3 to break down)

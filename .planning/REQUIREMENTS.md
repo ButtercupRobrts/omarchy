@@ -20,6 +20,12 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **SCALE-06**: The DISPLAYS section shows each monitor's current scale alongside its name
 - [x] **SCALE-07**: The panel behaves correctly with a single monitor (scale row works, no DISPLAYS section needed)
 
+### Position Integrity
+
+- [ ] **SCALE-08**: A scale change preserves edge-adjacency — a monitor touching (or within ~5px of) a neighbor stays touching after rescale, on both axes; no new overlaps or dead gaps are created
+- [ ] **SCALE-09**: The recomputed position persists to the target monitor's own `hl.monitor()` line in `monitors.lua` — a reload does not recreate overlap/gap
+- [ ] **SCALE-10**: `omarchy_gdk_scale` tracks `round(max(all monitor scales))` — scaling a secondary monitor cannot corrupt the global GTK/XWayland factor for denser displays
+
 ## v2 Requirements
 
 Deferred to future release. Tracked but not in current roadmap.
@@ -50,13 +56,16 @@ Deferred to future release. Tracked but not in current roadmap.
 | SCALE-05 | Phase 2 | Complete |
 | SCALE-06 | Phase 2 | Complete |
 | SCALE-07 | Phase 2 | Complete |
+| SCALE-08 | Phase 3 | Planned |
+| SCALE-09 | Phase 3 | Planned |
+| SCALE-10 | Phase 3 | Planned |
 
 **Coverage:**
 
-- v1 requirements: 7 total
-- Mapped to phases: 7
+- v1 requirements: 10 total
+- Mapped to phases: 10
 - Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-09-14*
-*Last updated: 2026-09-14 after initial definition*
+*Last updated: 2026-09-14 — Phase 3 requirements added (SCALE-08..10) from live-UAT findings*
