@@ -119,6 +119,25 @@ hl.monitor({ output = "", mode = "preferred", position = "auto", scale = 1 })
 LUA
 }
 
+# Nor is one fenced inside a levelled --[==[ ]==] block comment, which Lua
+# treats exactly like --[[ ]] but only closes on the matching ]==].
+write_levelled_comment_rule_config() {
+  cat >"$monitor_lua" <<'LUA'
+--[==[
+hl.monitor({ output = "eDP-1", mode = "preferred", position = "auto", scale = 1.5 })
+]==]
+hl.monitor({ output = "", mode = "preferred", position = "auto", scale = 1 })
+LUA
+}
+
+# Nor is one sitting inside a levelled [=[ ]=] long string.
+write_levelled_string_rule_config() {
+  cat >"$monitor_lua" <<'LUA'
+local s = [=[ hl.monitor({ output = "eDP-1", mode = "preferred", position = "auto", scale = 9 }) ]=]
+hl.monitor({ output = "", mode = "preferred", position = "auto", scale = 1 })
+LUA
+}
+
 # The literal catch-all only: the scale belongs on an appended named rule, not
 # on the rule every unlisted output shares.
 write_literal_catch_all_config() {
@@ -334,6 +353,29 @@ grep -Fx 'hl.monitor({ output = "eDP-1", mode = "preferred", position = "auto", 
 grep -Fx 'hl.monitor({ output = "eDP-1", mode = "2880x1800@120.0", position = "0x0", scale = 2 })' "$monitor_lua" >/dev/null ||
   fail "monitor scaling appends a named rule when only a block comment names the output"
 pass "monitor scaling ignores a block-commented rule and appends"
+
+# Same for a rule fenced inside a levelled --[==[ ]==] block comment: it is
+# dead text, left byte-identical, and a named rule is appended for the
+# monitor.
+write_levelled_comment_rule_config
+run_scaling 2
+grep -Fx 'hl.monitor({ output = "eDP-1", mode = "preferred", position = "auto", scale = 1.5 })' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling leaves a levelled-comment rule alone"
+grep -Fx -- ']==]' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling keeps the levelled comment's closing bracket"
+grep -Fx 'hl.monitor({ output = "eDP-1", mode = "2880x1800@120.0", position = "0x0", scale = 2 })' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling appends a named rule when only a levelled comment names the output"
+pass "monitor scaling ignores a levelled-comment rule and appends"
+
+# Same for a rule inside a levelled [=[ ]=] long string: string contents are
+# not keys, so the line is left alone and a named rule is appended.
+write_levelled_string_rule_config
+run_scaling 2
+grep -Fx 'local s = [=[ hl.monitor({ output = "eDP-1", mode = "preferred", position = "auto", scale = 9 }) ]=]' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling leaves a levelled long string byte-identical"
+grep -Fx 'hl.monitor({ output = "eDP-1", mode = "2880x1800@120.0", position = "0x0", scale = 2 })' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling appends a named rule when only a long string names the output"
+pass "monitor scaling ignores a levelled-string rule and appends"
 
 # A literal catch-all is never the persistence target either: the named
 # append wins over it and the catch-all stays byte-identical.
