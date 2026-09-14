@@ -30,8 +30,10 @@ Requirements: SCALE-05 (per-bar targeting), SCALE-06 (per-display scale in DISPL
 ### Targeting mechanism
 - **D-05:** The panel targets the monitor whose bar hosts the panel instance — resolved from the widget's own window screen (the same source `Bar.qml`'s `slotScreenName` uses), not `Hyprland.focusedMonitor`. A keyboard-summoned panel opens on the focused screen's bar and therefore targets the focused screen — self-consistent.
 
+### Scale plumbing
+- **D-06:** Per-display scale reaches the panel by extending `omarchy-monitor-state`'s line-7 displays JSON with a `scale` field — a one-word additive jq change that leaves the 8-line positional contract untouched and keeps a single Process/update path. **This supersedes the init decision** (recorded in REQUIREMENTS.md Out-of-Scope and STATE.md) that had the panel reading `hyprctl monitors -j` itself; the init rationale (don't destabilize the positional contract) is satisfied because the line count and ordering do not change.
+
 ### the agent's Discretion
-- Data plumbing for per-display scale: extend `omarchy-monitor-state`'s displays JSON with a `scale` field (non-breaking — the 8-line positional contract is preserved) vs. a separate `hyprctl monitors -j` call in Model.js. Research/planner decides; lean toward extending the existing state script since the panel already polls it.
 - Exact single-monitor header form when only one display exists.
 - Whether the current-scale pill highlight uses the existing `matchingScaleIndex` machinery.
 

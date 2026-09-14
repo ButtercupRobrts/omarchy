@@ -3,10 +3,10 @@ gsd_state_version: "1.0"
 current_phase: 1
 status: executing
 stopped_at: Completed 01-01-PLAN.md
-last_updated: "2026-09-14T10:43:39.786Z"
+last_updated: "2026-09-14T12:58:43.674Z"
 last_activity: 2026-09-14
 last_activity_desc: Phase 1 marked complete
-state_head: c17c28b71b6ceef2216977c5f6e8e356aec84356
+state_head: ea83d48921c3e8d0ec19e1f196f547928f8067b4
 progress:
   total_phases: 2
   completed_phases: 0
@@ -71,6 +71,7 @@ Recent decisions affecting current work:
 - [Init]: Independent implementation, not building on PR #11414 — standalone change is more reviewable
 - [Init]: Panel reads `hyprctl monitors -j` itself for per-display scale rather than rewriting `omarchy-monitor-state`'s positional contract
 - [Phase 1]: Per-monitor persistence: the target monitor's own hl.monitor() rule is the system of record (in-place rewrite or single-line append); the shared omarchy_monitor_scale variable and output="" catch-all are never written for a targeted monitor — awk rewriter blanks comments and string contents at stable byte offsets, matches output by name or desc: prefix against description/make-model-serial, splices scale into original text; exit 0 rewrote, 3 append; identity via ENVIRON never -v
+- [Phase 2]: Per-display scale via omarchy-monitor-state displays JSON 'scale' field (additive, positional contract untouched) — supersedes init decision for a separate hyprctl Process
 
 ### Pending Todos
 
