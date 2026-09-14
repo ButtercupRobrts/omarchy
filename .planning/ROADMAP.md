@@ -1,85 +1,110 @@
-# Roadmap: Omarchy Fork — Per-Monitor Display Scaling
+# Roadmap: Omarchy Fork — Transcode Quality & Size Feedback
 
 ## Overview
 
-Fix per-monitor display scaling on the Omarchy fork in two atomic phases. First, repair `bin/omarchy-hyprland-monitor-scaling` so a scale change persists to the target monitor's own `hl.monitor()` line in `~/.config/hypr/monitors.lua` and preserves its configured position in the live apply — ending the silent revert after reload/reboot. Then update `shell/plugins/panels/monitor/` so each screen's bar Display panel targets the monitor it sits on and shows each monitor's current scale. The split keeps each change single-concern and reviewable per Omarchy conventions, and maps to two potential upstream PRs.
+Milestone v1.1 adds a quality step and size feedback to `omarchy-transcode` in four atomic phases. First, `omarchy-menu-select` learns a `--default-index` flag so a menu row can be pre-highlighted — additive payload plumbing that unblocks "Enter = medium". Then `omarchy-transcode` gains a non-interactive 4th positional quality arg with locked per-codec tier tables (x264 CRF 18/23/28, x265 CRF 20/24/28, gif 15/10/5 fps) where `medium` reproduces today's flags byte-for-byte. The interactive quality prompt follows, showing `~N MB` estimates as row subtext for mp4 and fps for gif, and the milestone closes with the actual output size in the completion notification plus a docs sweep. The ordering isolates the cross-component contract change first and proves the encoder tables before any UI depends on them — each phase is one reviewable change and a candidate upstream PR.
 
 ## Phases
 
 **Phase Numbering:**
 
-- Integer phases (1, 2, 3): Planned milestone work
-- Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
+- Integer phases (4, 5, 6, 7): Planned milestone work
+- Decimal phases (4.1, 4.2): Urgent insertions (marked with INSERTED)
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Per-monitor scale persistence in the scaling CLI** - `omarchy-hyprland-monitor-scaling` rewrites the target monitor's own `hl.monitor()` line and preserves configured position on live apply
-- [ ] **Phase 2: Per-monitor Display panel** - Each screen's bar panel targets its own monitor and the DISPLAYS section shows per-monitor scale
+- [ ] **Phase 4: Menu `defaultIndex` plumbing** - `omarchy-menu-select` accepts `--default-index N` (post-`--` menu arg) → `defaultIndex` in the JSON payload → `Menu.qml` `openDmenu` pre-highlights that row
+- [ ] **Phase 5: Non-interactive quality in `omarchy-transcode`** - Optional 4th positional arg with validation, locked CRF/fps tier tables, non-default quality filename suffix, deliberate output-collision policy
+- [ ] **Phase 6: Interactive quality prompt + size estimates** - Quality menu step after format+resolution for video, `~N MB` subtexts for mp4, fps subtexts for gif, `medium` pre-highlighted via Phase 4 plumbing
+- [ ] **Phase 7: Completion-size notification + docs** - Actual output size appended to the done notification; usage/metadata/manual sync
 
 ## Phase Details
 
-### Phase 1: Per-monitor scale persistence in the scaling CLI
+### Phase 4: Menu `defaultIndex` plumbing
 
-**Goal**: `bin/omarchy-hyprland-monitor-scaling` persists a scale change to the target monitor's own `hl.monitor()` line in `~/.config/hypr/monitors.lua` and keeps the monitor's configured position when applying live via `hyprctl eval`
-**Depends on**: Nothing (first phase)
-**Requirements**: SCALE-01, SCALE-02, SCALE-03, SCALE-04
+**Goal**: `omarchy-menu-select` accepts `--default-index N` after `--`, emits `defaultIndex` in the select-mode JSON payload, and `Menu.qml`'s `openDmenu` initializes `selectedIndex` from it — with every existing caller byte-identical in behavior
+
+**Depends on**: Nothing (first milestone phase)
+
+**Requirements**: MENU-01
+
 **Success Criteria** (what must be TRUE):
 
-  1. Changing scale via `omarchy hyprland monitor scaling` rewrites the target monitor's own `hl.monitor()` line in `~/.config/hypr/monitors.lua`, and the new scale is still in effect after `hyprctl reload` and after reboot
-  2. The live apply preserves the monitor's configured position — the Samsung at `-1200x0` stays put instead of being forced to `position = "auto"`
-  3. Persistence still works on stock configs that use the `omarchy_monitor_scale` variable or a literal catch-all line (no regression)
-  4. Persistence handles realistic `monitors.lua` shapes: multi-line `hl.monitor({...})` entries, `desc:` selectors, and monitors without an explicit scale
+  1. `omarchy-menu-select "Prompt" a b c -- --default-index 1` opens the menu with row `b` pre-highlighted; Enter selects it
+  2. All 16 existing `omarchy-menu-select` callers — including stdin-fed ones (timezone, keybindings, plugin menus) — behave exactly as before; the payload field is simply absent
+  3. Out-of-range `defaultIndex` values clamp safely via the existing `rebuildDmenuDisplay` bounds check
+  4. Typing in the filter still resets the highlight to row 0 (initial-only semantics, per `setFilter` behavior)
 
-**Plans**: 1/1 plans executed
+**Canonical refs:** `.planning/research/ARCHITECTURE.md`, `.planning/research/PITFALLS.md` (pitfall 2), `bin/omarchy-menu-select`, `shell/plugins/menu/Menu.qml`
 
-Plans:
+**Plans**: 0 plans
 
-- [x] 01-01-PLAN.md
-- [x] 01-01: Rewrite scale persistence to target the monitor's own `hl.monitor()` line and preserve configured position in the live `hyprctl eval` apply
+### Phase 5: Non-interactive quality in `omarchy-transcode`
 
-### Phase 2: Per-monitor Display panel
+**Goal**: `omarchy transcode INPUT FORMAT RESOLUTION [QUALITY]` accepts an optional quality arg that selects locked per-codec tiers — x264 CRF 18/23/28, x265 CRF 20/24/28, gif 15/10/5 fps — where `medium` or omitted reproduces today's encoder flags byte-for-byte, non-default quality appends a suffix to the output filename, and output collisions follow a deliberate non-interactive-safe policy
 
-**Goal**: `shell/plugins/panels/monitor/` targets the monitor each bar instance sits on and shows each monitor's current scale in the DISPLAYS section
-**Depends on**: Phase 1
-**Requirements**: SCALE-05, SCALE-06, SCALE-07
+**Depends on**: Nothing (can run parallel to Phase 4)
+
+**Requirements**: QUAL-02, QUAL-03, SAFE-01
+
 **Success Criteria** (what must be TRUE):
 
-  1. SCALE pills on the Samsung's bar (left, `HDMI-A-1`) change the Samsung's scale; pills on the laptop bar (right, `eDP-1`) change `eDP-1` — each bar targets its own screen, not the globally focused monitor
-  2. The DISPLAYS section shows each monitor's name with its current scale (e.g. `HDMI-A-1 · 1.6x`)
-  3. A scale change made from the panel persists to the correct monitor's `hl.monitor()` line and survives reload/reboot (via the Phase 1 CLI)
-  4. Single-monitor setups still work — the scale row functions and the panel behaves as before
+  1. `omarchy transcode in.mov mp4 1080p medium` and `omarchy transcode in.mov mp4 1080p` invoke ffmpeg with exactly today's flags (x264 `-preset fast -crf 23`, aac 192k) and produce `in-1080p.mp4`
+  2. `high`/`low` map to the locked tier tables (x264 18/28, x265 20/28 at 4k, gif 15/5 fps) and produce `in-1080p-high.mp4` / `in-1080p-low.mp4`
+  3. A 4th positional arg on a picture input exits non-zero with a clear error; picture flow is otherwise untouched
+  4. An existing output file never hangs (ffmpeg stdin prompt) or silently fails on a detached launch — the collision policy is explicit in code and covered by test
+  5. `usage()`, `# omarchy:args=`, and relevant docs reflect the new arg
 
-**Plans**: 1/1 plans executed
+**Canonical refs:** `.planning/research/STACK.md` (tier tables), `.planning/research/PITFALLS.md` (pitfalls 3–7), `bin/omarchy-transcode`
 
-Plans:
+**Plans**: 0 plans
 
-- [x] 02-01-PLAN.md
-- [x] 02-01: Per-bar monitor targeting for SCALE pills plus per-monitor scale display in the DISPLAYS section
+### Phase 6: Interactive quality prompt + size estimates
+
+**Goal**: The video transcode flow gains a "Select quality" step after format+resolution whose rows carry `~N MB` estimate subtexts for mp4 (ffprobe duration × tier bitrate table + 192k audio) and fps subtexts for gif, with `medium` pre-highlighted via `--default-index 1` — pictures see no new prompt
+
+**Depends on**: Phase 4 (needs `--default-index`), Phase 5 (needs the tier tables)
+
+**Requirements**: QUAL-01, SIZE-01
+
+**Success Criteria** (what must be TRUE):
+
+  1. Transcoding a video interactively shows file → format → resolution → quality; the quality rows read `high/medium/low` with subtexts (`CRF 18 · ~110 MB` for mp4, `15 fps` for gif)
+  2. The estimate is duration × per-resolution/tier bitrate midpoint + fixed audio term, rendered as `~N MB` with 1–2 sig figs; when it would exceed the source size or duration probe fails, the subtext degrades gracefully rather than lying
+  3. `medium` is pre-highlighted; pressing Enter on defaults reproduces Phase 5's `medium` behavior
+  4. The `label⇥subtext` return value is stripped (`${sel%%$'\t'*}`) before tier matching — no silent `set -e` aborts
+  5. Picture inputs still stop after the resolution prompt
+  6. ffprobe runs only inside the interactive video branch — non-interactive callers never pay for it
+
+**Canonical refs:** `.planning/research/ARCHITECTURE.md` (integration points, tab contract), `.planning/research/FEATURES.md` (estimate placement), `.planning/research/PITFALLS.md` (pitfalls 1, 8, 10)
+
+**Plans**: 0 plans
+
+### Phase 7: Completion-size notification + docs
+
+**Goal**: The transcode completion notification reports the actual output file size, closing the estimate→actual loop, and all user-facing docs/metadata are in sync
+
+**Depends on**: Phase 6
+
+**Requirements**: SIZE-02
+
+**Success Criteria** (what must be TRUE):
+
+  1. The completion notification includes the actual output size (e.g. `38 MB`), for both video and picture transcodes
+  2. `usage()`, `# omarchy:*` metadata, `docs/`, and `manual/` entries are consistent with the shipped behavior (test/cli metadata shape stays green)
+
+**Canonical refs:** `.planning/research/ARCHITECTURE.md`, `bin/omarchy-transcode`
+
+**Plans**: 0 plans
 
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2
+Phases execute in numeric order: 4 → 5 → 6 → 7 (4 and 5 are independent; 6 gates on both)
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Per-monitor scale persistence in the scaling CLI | 1/1 | In Progress|  |
-| 2. Per-monitor Display panel | 1/1 | In Progress | - |
-
-### Phase 3: Scale-aware monitor position adjustment
-
-**Goal**: `omarchy-hyprland-monitor-scaling` recomputes the target monitor's position on scale change so edge-adjacent monitors stay adjacent — no new overlaps, no dead gaps that trap the cursor — persists the corrected position to `monitors.lua`, and makes `GDK_SCALE` track the maximum monitor scale instead of the last-scaled monitor's
-**Depends on**: Phase 2
-**Requirements**: SCALE-08, SCALE-09, SCALE-10
-**Success Criteria** (what must be TRUE):
-
-  1. Rescaling an edge-adjacent monitor keeps it touching its neighbor — e.g. Samsung `HDMI-A-1` at `-1200x0` scale 1.6 → scale 1.5 lands at `-1280x0`, no overlap warning, cursor can still cross
-  2. Rescaling a floating monitor either preserves its position exactly or minimally clamps it only when the growth would create a new overlap — deliberate gaps are never silently normalized
-  3. The recomputed position is written to the target monitor's `hl.monitor()` rule and survives `hyprctl reload`
-  4. `omarchy_gdk_scale` reflects `round(max(all monitor scales))` after any scale change, so scaling a secondary monitor cannot degrade XWayland sharpness on a denser primary
-
-**Plans**: 1 plan
-
-Plans:
-
-- [x] 03-01-PLAN.md — scale-aware position recompute + persistence + max-scale GDK (4 tasks, 1 wave)
+| 4. Menu `defaultIndex` plumbing | 0/0 | Pending |  |
+| 5. Non-interactive quality in `omarchy-transcode` | 0/0 | Pending |  |
+| 6. Interactive quality prompt + size estimates | 0/0 | Pending |  |
+| 7. Completion-size notification + docs | 0/0 | Pending |  |

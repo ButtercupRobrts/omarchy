@@ -53,13 +53,13 @@ Deferred to a future milestone. Tracked but not in the current roadmap.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| QUAL-01 | Phase 4 | Pending |
-| QUAL-02 | Phase 4 | Pending |
-| QUAL-03 | Phase 4 | Pending |
-| SIZE-01 | Phase 4 | Pending |
-| SIZE-02 | Phase 4 | Pending |
 | MENU-01 | Phase 4 | Pending |
-| SAFE-01 | Phase 4 | Pending |
+| QUAL-02 | Phase 5 | Pending |
+| QUAL-03 | Phase 5 | Pending |
+| SAFE-01 | Phase 5 | Pending |
+| QUAL-01 | Phase 6 | Pending |
+| SIZE-01 | Phase 6 | Pending |
+| SIZE-02 | Phase 7 | Pending |
 
 **Coverage:**
 
