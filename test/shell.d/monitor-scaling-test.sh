@@ -19,19 +19,28 @@ cat >"$stub_bin/hyprctl" <<'SH'
 #!/bin/bash
 
 if [[ $1 == "monitors" && $2 == "-j" ]]; then
-  internal=$(printf '{"name":"eDP-1","focused":true,"scale":%s,"width":%s,"height":%s,"refreshRate":120.0,"x":0,"y":0,"description":"%s","make":"%s","model":"%s","serial":"%s"}' \
-    "${OMARCHY_TEST_MONITOR_SCALE:-2}" \
-    "${OMARCHY_TEST_MONITOR_WIDTH:-2880}" \
-    "${OMARCHY_TEST_MONITOR_HEIGHT:-1800}" \
-    "${OMARCHY_TEST_MONITOR_DESCRIPTION:-BOE NE180WUM}" \
-    "${OMARCHY_TEST_MONITOR_MAKE:-BOE}" \
-    "${OMARCHY_TEST_MONITOR_MODEL:-NE180WUM}" \
-    "${OMARCHY_TEST_MONITOR_SERIAL:-0x00000001}")
-  if [[ ${OMARCHY_TEST_EXTERNAL_MONITOR:-0} == "1" ]]; then
-    printf '[%s,%s]' "$internal" \
-      '{"name":"HDMI-A-1","focused":false,"scale":1.6,"width":1920,"height":1080,"refreshRate":144.0,"x":-1200,"y":0,"description":"Samsung C27JG5x","make":"Samsung","model":"C27JG5x","serial":"H4ZM800123"}'
+  # The stub is a fresh process per call, so post-eval state travels through
+  # the filesystem: the eval capture file doubles as the marker that the
+  # verify-read should serve the after-eval JSON.
+  if [[ -n ${OMARCHY_TEST_MONITORS_JSON_AFTER_EVAL:-} && -e ${OMARCHY_TEST_HYPRCTL_EVAL_OUT:-} ]]; then
+    printf '%s' "$OMARCHY_TEST_MONITORS_JSON_AFTER_EVAL"
+  elif [[ -n ${OMARCHY_TEST_MONITORS_JSON:-} ]]; then
+    printf '%s' "$OMARCHY_TEST_MONITORS_JSON"
   else
-    printf '[%s]' "$internal"
+    internal=$(printf '{"name":"eDP-1","focused":true,"scale":%s,"width":%s,"height":%s,"refreshRate":120.0,"x":0,"y":0,"transform":0,"description":"%s","make":"%s","model":"%s","serial":"%s"}' \
+      "${OMARCHY_TEST_MONITOR_SCALE:-2}" \
+      "${OMARCHY_TEST_MONITOR_WIDTH:-2880}" \
+      "${OMARCHY_TEST_MONITOR_HEIGHT:-1800}" \
+      "${OMARCHY_TEST_MONITOR_DESCRIPTION:-BOE NE180WUM}" \
+      "${OMARCHY_TEST_MONITOR_MAKE:-BOE}" \
+      "${OMARCHY_TEST_MONITOR_MODEL:-NE180WUM}" \
+      "${OMARCHY_TEST_MONITOR_SERIAL:-0x00000001}")
+    if [[ ${OMARCHY_TEST_EXTERNAL_MONITOR:-0} == "1" ]]; then
+      printf '[%s,%s]' "$internal" \
+        '{"name":"HDMI-A-1","focused":false,"scale":1.6,"width":1920,"height":1080,"refreshRate":144.0,"x":-1200,"y":0,"transform":0,"description":"Samsung C27JG5x","make":"Samsung","model":"C27JG5x","serial":"H4ZM800123"}'
+    else
+      printf '[%s]' "$internal"
+    fi
   fi
 elif [[ $1 == "eval" ]]; then
   printf '%s\n' "$2" >"$OMARCHY_TEST_HYPRCTL_EVAL_OUT"
@@ -40,6 +49,12 @@ else
 fi
 SH
 chmod +x "$stub_bin/hyprctl"
+
+# The dispatch guard skips the CLI when sourced, so the geometry function can
+# be unit-called directly. Only recompute_monitor_position is exercised this
+# way: set_scale and the dispatch arms exit on error paths, which would kill
+# this test file.
+source "$ROOT/bin/omarchy-hyprland-monitor-scaling"
 
 write_monitor_config() {
   cat >"$monitor_lua" <<'LUA'
@@ -190,6 +205,8 @@ run_scaling() {
     OMARCHY_TEST_MONITOR_MODEL="${OMARCHY_TEST_MONITOR_MODEL:-}" \
     OMARCHY_TEST_MONITOR_SERIAL="${OMARCHY_TEST_MONITOR_SERIAL:-}" \
     OMARCHY_TEST_EXTERNAL_MONITOR="${OMARCHY_TEST_EXTERNAL_MONITOR:-0}" \
+    OMARCHY_TEST_MONITORS_JSON="${OMARCHY_TEST_MONITORS_JSON:-}" \
+    OMARCHY_TEST_MONITORS_JSON_AFTER_EVAL="${OMARCHY_TEST_MONITORS_JSON_AFTER_EVAL:-}" \
     "$ROOT/bin/omarchy-hyprland-monitor-scaling" "$@"
 }
 
@@ -476,13 +493,15 @@ grep -Fx 'hl.monitor({ output = "eDP-1", mode = "preferred", position = "auto", 
 pass "monitor scaling writes through a symlinked monitors.lua"
 
 # A named target monitor gets the live apply and the persisted append keyed to
-# its own name and live position, and the audit log records it.
+# its own name, and the audit log records it. Its right edge touches eDP-1's
+# left edge, so the recomputed position keeps them adjacent at the new size
+# (1920/2.5 = 768 -> -768x0).
 write_monitor_config
 rm -f "$eval_out" "$scale_log"
 OMARCHY_TEST_EXTERNAL_MONITOR=1 run_scaling 2.5 HDMI-A-1
 grep -F 'output = "HDMI-A-1"' "$eval_out" >/dev/null || fail "targeted scaling evals the named monitor"
-grep -F 'position = "-1200x0"' "$eval_out" >/dev/null || fail "targeted scaling replays the target's live position"
-grep -Fx 'hl.monitor({ output = "HDMI-A-1", mode = "1920x1080@144.0", position = "-1200x0", scale = 2.5 })' "$monitor_lua" >/dev/null ||
+grep -F 'position = "-768x0"' "$eval_out" >/dev/null || fail "targeted scaling keeps the adjacent edge touching"
+grep -Fx 'hl.monitor({ output = "HDMI-A-1", mode = "1920x1080@144.0", position = "-768x0", scale = 2.5 })' "$monitor_lua" >/dev/null ||
   fail "targeted scaling persists an appended rule for the named monitor"
 ! grep -F 'output = "eDP-1"' "$monitor_lua" >/dev/null ||
   fail "targeted scaling does not write a rule for the focused monitor"
@@ -490,12 +509,14 @@ grep -F 'monitor=HDMI-A-1' "$scale_log" >/dev/null || fail "targeted scaling aud
 pass "monitor scaling targets a named monitor"
 
 # Stepping a named monitor reads that monitor's scale (1.6 -> 2), not the
-# focused monitor's (2 -> 3).
+# focused monitor's (2 -> 3), and the recomputed position tracks the new
+# logical width (1920/2 = 960 -> -960x0).
 write_monitor_config
 rm -f "$eval_out"
 OMARCHY_TEST_EXTERNAL_MONITOR=1 run_scaling up HDMI-A-1
 grep -F 'output = "HDMI-A-1"' "$eval_out" >/dev/null || fail "targeted stepping evals the named monitor"
 grep -F 'scale = 2 ' "$eval_out" >/dev/null || fail "targeted stepping reads the target's scale, not the focused one"
+grep -F 'position = "-960x0"' "$eval_out" >/dev/null || fail "targeted stepping keeps the adjacent edge touching"
 ! grep -F 'scale = 3 ' "$eval_out" >/dev/null || fail "targeted stepping does not step the focused monitor"
 pass "monitor scaling steps the named monitor's scale"
 
@@ -542,3 +563,49 @@ pass "monitor scaling rejects extra arguments"
 scale=$(run_scaling)
 [[ $scale == "2" ]] || fail "bare scaling still reports the focused monitor's scale" "actual: $scale"
 pass "monitor scaling bare call reports the focused scale"
+
+# --- recompute_monitor_position unit layer -------------------------------
+# The sourced function is pure: JSON in, "XxY kind dropped" out, status codes
+# only for unusable input.
+
+# A left-adjacent monitor keeps its right edge pinned to the neighbor's left
+# edge as the logical width grows (1920/1.5 = 1280).
+monitors_json='[{"name":"eDP-1","x":0,"y":0,"width":2880,"height":1800,"scale":2},{"name":"HDMI-A-1","x":-1200,"y":0,"width":1920,"height":1080,"scale":1.6}]'
+set +e
+pos=$(recompute_monitor_position "$monitors_json" "HDMI-A-1" 1.5)
+status=$?
+set -e
+(( status == 0 )) || fail "recompute returns success for a left-adjacent grow"
+[[ $pos == "-1280x0 adjacency -" ]] || fail "recompute keeps the left-adjacent edge touching on grow" "actual: $pos"
+pass "recompute keeps left-adjacent monitor touching on grow"
+
+# Shrinking the logical width pulls the monitor in rather than stranding a
+# dead gap (1920/2 = 960).
+set +e
+pos=$(recompute_monitor_position "$monitors_json" "HDMI-A-1" 2)
+status=$?
+set -e
+(( status == 0 )) || fail "recompute returns success for a left-adjacent shrink"
+[[ $pos == "-960x0 adjacency -" ]] || fail "recompute keeps the left-adjacent edge touching on shrink" "actual: $pos"
+pass "recompute keeps left-adjacent monitor touching on shrink"
+
+# A deliberate 50px gap (target right edge -50, neighbor left edge 0) survives
+# a shrink verbatim: the stored coordinate is preserved exactly.
+monitors_json='[{"name":"eDP-1","x":0,"y":0,"width":2880,"height":1800,"scale":2},{"name":"HDMI-A-1","x":-1250,"y":0,"width":1920,"height":1080,"scale":1.6}]'
+set +e
+pos=$(recompute_monitor_position "$monitors_json" "HDMI-A-1" 2)
+status=$?
+set -e
+(( status == 0 )) || fail "recompute returns success for a deliberate gap"
+[[ $pos == "-1250x0 unchanged -" ]] || fail "recompute preserves a deliberate gap verbatim" "actual: $pos"
+pass "recompute preserves a deliberate gap verbatim"
+
+# A lone monitor has no adjacency to preserve: live position, unchanged.
+monitors_json='[{"name":"eDP-1","x":0,"y":0,"width":2880,"height":1800,"scale":2}]'
+set +e
+pos=$(recompute_monitor_position "$monitors_json" "eDP-1" 1.5)
+status=$?
+set -e
+(( status == 0 )) || fail "recompute returns success for a single monitor"
+[[ $pos == "0x0 unchanged -" ]] || fail "recompute leaves a single monitor at its live position" "actual: $pos"
+pass "recompute leaves a single monitor unchanged"
