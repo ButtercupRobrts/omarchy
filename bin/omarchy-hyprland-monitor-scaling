@@ -173,8 +173,10 @@ persist_monitor_scale() {
         desc = trim(desc)
         short = trim(short)
 
-        in_comment = 0   # inside a multi-line --[[ ]] comment
-        in_long = 0      # inside a [[ ]] long string
+        in_comment = 0   # inside a multi-line --[=*[ ]=*] comment
+        in_long = 0      # inside a [=*[ ]=*] long string
+        comment_close = ""  # ]=*] matching the open comment level
+        long_close = ""     # ]=*] matching the open string level
         in_str = 0       # inside a quoted string (reset each line)
         depth = 0
         in_block = 0
@@ -193,10 +195,18 @@ persist_monitor_scale() {
         return s
       }
 
+      function eq_str(n,   s) {
+        s = ""
+        while (n > 0) { s = s "="; n-- }
+        return s
+      }
+
       # Produces two shadows of the line in the globals b_out and s_out: b_out
-      # blanks comments (multi-line --[[ ]] regions tracked via in_comment) and
-      # s_out additionally blanks string contents. Both keep byte offsets
-      # aligned with $0 so positions found in them splice back into it.
+      # blanks comments (multi-line --[=*[ ]=*] regions tracked via in_comment)
+      # and s_out additionally blanks string contents. Both keep byte offsets
+      # aligned with $0 so positions found in them splice back into it. Long
+      # brackets carry a level: a --[==[ comment only closes on ]==] and a [=[
+      # string only on ]=], so the matching ]=*] is remembered on open.
       function scan_line(line,   i, n, c, two) {
         b_out = ""
         s_out = ""
@@ -207,16 +217,21 @@ persist_monitor_scale() {
           c = substr(line, i, 1)
           two = substr(line, i, 2)
           if (in_comment) {
-            if (two == "]]") {
-              b_out = b_out "  "; s_out = s_out "  "; in_comment = 0; i += 2
+            if (c == "]" && substr(line, i, length(comment_close)) == comment_close) {
+              b_out = b_out sp(length(comment_close))
+              s_out = s_out sp(length(comment_close))
+              in_comment = 0
+              i += length(comment_close)
             } else {
               b_out = b_out " "; s_out = s_out " "; i++
             }
             continue
           }
           if (in_long) {
-            if (two == "]]") {
-              b_out = b_out "]]"; s_out = s_out "]]"; in_long = 0; i += 2
+            if (c == "]" && substr(line, i, length(long_close)) == long_close) {
+              b_out = b_out long_close; s_out = s_out long_close
+              in_long = 0
+              i += length(long_close)
             } else {
               b_out = b_out c; s_out = s_out " "; i++
             }
@@ -235,15 +250,23 @@ persist_monitor_scale() {
             continue
           }
           if (two == "--") {
-            if (substr(line, i + 2, 2) == "[[") {
-              b_out = b_out "    "; s_out = s_out "    "; in_comment = 1; i += 4
+            if (match(substr(line, i + 2), /^\[=*\[/)) {
+              b_out = b_out sp(2 + RLENGTH)
+              s_out = s_out sp(2 + RLENGTH)
+              in_comment = 1
+              comment_close = "]" eq_str(RLENGTH - 2) "]"
+              i += 2 + RLENGTH
             } else {
               b_out = b_out sp(n - i + 1); s_out = s_out sp(n - i + 1); i = n + 1
             }
             continue
           }
-          if (two == "[[") {
-            b_out = b_out "[["; s_out = s_out "[["; in_long = 1; i += 2
+          if (c == "[" && match(substr(line, i + 1), /^=*\[/)) {
+            in_long = 1
+            long_close = "]" eq_str(RLENGTH - 1) "]"
+            b_out = b_out substr(line, i, RLENGTH + 1)
+            s_out = s_out substr(line, i, RLENGTH + 1)
+            i += RLENGTH + 1
             continue
           }
           if (c == "\"" || c == squote) {
