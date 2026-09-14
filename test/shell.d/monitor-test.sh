@@ -54,6 +54,43 @@ assertDeepEqual(
   'monitor keeps presets until display dimensions are known'
 )
 
+assertDeepEqual(
+  monitor.scalesWithCurrent(['1', '1.25', '1.6', '2', '3', '4'], 3.2, 1280, 800),
+  ['1', '1.25', '1.6', '2', '3', '4'],
+  'monitor leaves the preset ladder alone when the current scale is already a pill'
+)
+assertDeepEqual(
+  monitor.scalesWithCurrent(['1', '1.25', '1.6', '2', '3', '4'], 1.5, 1920, 1080),
+  ['1', '1.25', '1.5', '1.6', '2', '3', '4'],
+  'monitor inserts a non-preset current scale in numeric order'
+)
+assertDeepEqual(
+  monitor.scalesWithCurrent(['1', '1.25', '1.6', '2', '3', '4'], '', 1920, 1080),
+  ['1', '1.25', '1.6', '2', '3', '4'],
+  'monitor leaves the ladder alone without a current scale'
+)
+assertDeepEqual(
+  monitor.scalesWithCurrent(['1', '1.25', '1.6', '2', '3', '4'], 'nope', 1920, 1080),
+  ['1', '1.25', '1.6', '2', '3', '4'],
+  'monitor leaves the ladder alone for an invalid current scale'
+)
+assertDeepEqual(
+  monitor.scalesWithCurrent(
+    monitor.availableScales(['1', '1.25', '1.6', '2', '3', '4'], 5968, 3230),
+    1.5, 5968, 3230
+  ),
+  ['1', '1.5', '2'],
+  'monitor inserts the current scale into a mode-filtered ladder'
+)
+assertEqual(
+  monitor.matchingScaleIndex(
+    monitor.scalesWithCurrent(['1', '1.25', '1.6', '2', '3', '4'], 1.5, 1920, 1080),
+    1.5, 1920, 1080
+  ),
+  2,
+  'monitor marks the inserted current-scale pill active'
+)
+
 assertEqual(monitor.brightnessName(96), 'Sun blast', 'monitor names very bright displays')
 assertEqual(monitor.brightnessName(12), 'Candlelit', 'monitor names dim displays')
 

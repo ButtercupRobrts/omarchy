@@ -60,7 +60,7 @@ Panel {
   readonly property var scalePresets: ["1", "1.25", "1.6", "2", "3", "4"]
   readonly property var scaleValues: {
     var display = ownDisplay()
-    return display ? Model.availableScales(scalePresets, display.width, display.height) : scalePresets
+    return display ? Model.scalesWithCurrent(Model.availableScales(scalePresets, display.width, display.height), root.ownScale, display.width, display.height) : scalePresets
   }
   property string focusSection: "scale"
   property int selectedIndex: 0
