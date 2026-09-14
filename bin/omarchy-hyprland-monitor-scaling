@@ -329,6 +329,26 @@ persist_monitor_scale() {
         return j
       }
 
+      # The last char of the value starting at pos in block_nostr: the first
+      # , ; } or unbalanced closer at the depth the value starts at, so a
+      # comma inside a nested call like math.max(1, 1.5) cannot truncate the
+      # expression and splice invalid Lua into the file.
+      function value_end(pos,   i, n, d, c) {
+        d = 0
+        n = length(block_nostr)
+        for (i = pos; i <= n; i++) {
+          c = substr(block_nostr, i, 1)
+          if (c == "(" || c == "{" || c == "[") { d++; continue }
+          if (c == ")" || c == "}" || c == "]") {
+            if (d == 0) return i - 1
+            d--
+            continue
+          }
+          if (d == 0 && (c == "," || c == ";")) return i - 1
+        }
+        return n
+      }
+
       # The output selector of the block, read from the comment-blanked text at
       # offsets located in the string-blanked text so key-like text inside a
       # string cannot pose as the output key. Only the top-level output key of
@@ -369,11 +389,7 @@ persist_monitor_scale() {
         kstart = top_level_key("scale")
         if (kstart) {
           vstart = value_start(kstart)
-          if (match(substr(block_nostr, vstart), /[,;}]/)) {
-            vend = vstart + RSTART - 2
-          } else {
-            vend = length(block_nostr)
-          }
+          vend = value_end(vstart)
           while (vend > vstart && substr(block_nostr, vend, 1) ~ /[[:space:]]/) vend--
           block_orig = substr(block_orig, 1, kstart - 1) "scale = " new_scale substr(block_orig, vend + 1)
           return

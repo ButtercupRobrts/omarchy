@@ -154,6 +154,14 @@ hl.monitor({ extra = { output = "eDP-1" }, output = "DP-2", scale = 1.5 })
 LUA
 }
 
+# A scale handed an expression is replaced whole: truncating at the comma
+# inside the call would splice invalid Lua into the file.
+write_expression_scale_rule_config() {
+  cat >"$monitor_lua" <<'LUA'
+hl.monitor({ output = "eDP-1", mode = "preferred", position = "auto", scale = math.max(1, 1.5) })
+LUA
+}
+
 # The literal catch-all only: the scale belongs on an appended named rule, not
 # on the rule every unlisted output shares.
 write_literal_catch_all_config() {
@@ -412,6 +420,16 @@ grep -Fx 'hl.monitor({ extra = { output = "eDP-1" }, output = "DP-2", scale = 1.
 grep -Fx 'hl.monitor({ output = "eDP-1", mode = "2880x1800@120.0", position = "0x0", scale = 2 })' "$monitor_lua" >/dev/null ||
   fail "monitor scaling appends a named rule when only a nested table names the output"
 pass "monitor scaling ignores a nested table output selector"
+
+# A scale handed an expression is replaced whole: the comma inside the call
+# must not truncate the value and leave invalid Lua behind.
+write_expression_scale_rule_config
+run_scaling 2
+grep -Fx 'hl.monitor({ output = "eDP-1", mode = "preferred", position = "auto", scale = 2 })' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling replaces an expression-valued scale whole"
+! grep -F '1.5)' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling does not leave the tail of an expression scale behind"
+pass "monitor scaling replaces an expression-valued scale whole"
 
 # A literal catch-all is never the persistence target either: the named
 # append wins over it and the catch-all stays byte-identical.
