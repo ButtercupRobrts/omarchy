@@ -378,3 +378,71 @@ run_scaling 2
 grep -Fx 'hl.monitor({ output = "eDP-1", mode = "preferred", position = "auto", scale = 2 })' "$real_lua" >/dev/null ||
   fail "monitor scaling writes through the symlink to the real file"
 pass "monitor scaling writes through a symlinked monitors.lua"
+
+# A named target monitor gets the live apply and the persisted append keyed to
+# its own name and live position, and the audit log records it.
+write_monitor_config
+rm -f "$eval_out" "$scale_log"
+OMARCHY_TEST_EXTERNAL_MONITOR=1 run_scaling 2.5 HDMI-A-1
+grep -F 'output = "HDMI-A-1"' "$eval_out" >/dev/null || fail "targeted scaling evals the named monitor"
+grep -F 'position = "-1200x0"' "$eval_out" >/dev/null || fail "targeted scaling replays the target's live position"
+grep -Fx 'hl.monitor({ output = "HDMI-A-1", mode = "1920x1080@144.0", position = "-1200x0", scale = 2.5 })' "$monitor_lua" >/dev/null ||
+  fail "targeted scaling persists an appended rule for the named monitor"
+! grep -F 'output = "eDP-1"' "$monitor_lua" >/dev/null ||
+  fail "targeted scaling does not write a rule for the focused monitor"
+grep -F 'monitor=HDMI-A-1' "$scale_log" >/dev/null || fail "targeted scaling audits the named monitor"
+pass "monitor scaling targets a named monitor"
+
+# Stepping a named monitor reads that monitor's scale (1.6 -> 2), not the
+# focused monitor's (2 -> 3).
+write_monitor_config
+rm -f "$eval_out"
+OMARCHY_TEST_EXTERNAL_MONITOR=1 run_scaling up HDMI-A-1
+grep -F 'output = "HDMI-A-1"' "$eval_out" >/dev/null || fail "targeted stepping evals the named monitor"
+grep -F 'scale = 2 ' "$eval_out" >/dev/null || fail "targeted stepping reads the target's scale, not the focused one"
+! grep -F 'scale = 3 ' "$eval_out" >/dev/null || fail "targeted stepping does not step the focused monitor"
+pass "monitor scaling steps the named monitor's scale"
+
+# A monitor arg absent from hyprctl fails before any eval or write.
+write_named_rule_config
+rm -f "$eval_out"
+cp -- "$monitor_lua" "$test_tmp/pre-run.lua"
+set +e
+run_scaling 2 DP-9 >/dev/null 2>&1
+status=$?
+set -e
+(( status != 0 )) || fail "monitor scaling rejects an unknown monitor name"
+[[ ! -e $eval_out ]] || fail "an unknown monitor is never eval'd"
+cmp -s "$monitor_lua" "$test_tmp/pre-run.lua" || fail "an unknown monitor leaves monitors.lua untouched"
+pass "monitor scaling rejects an unknown monitor"
+
+# A monitor arg with Lua metacharacters fails the same way: no eval, no write.
+write_named_rule_config
+rm -f "$eval_out"
+cp -- "$monitor_lua" "$test_tmp/pre-run.lua"
+set +e
+run_scaling 2 'eDP-1" })os.execute("calc")--' >/dev/null 2>&1
+status=$?
+set -e
+(( status != 0 )) || fail "monitor scaling rejects a monitor arg with Lua metacharacters"
+[[ ! -e $eval_out ]] || fail "an unsafe monitor arg is never eval'd"
+cmp -s "$monitor_lua" "$test_tmp/pre-run.lua" || fail "an unsafe monitor arg leaves monitors.lua untouched"
+pass "monitor scaling refuses an unsafe monitor name"
+
+# More than two arguments is a usage error.
+write_monitor_config
+rm -f "$eval_out"
+set +e
+run_scaling 2 eDP-1 extra 2>"$test_tmp/stderr"
+status=$?
+set -e
+(( status != 0 )) || fail "monitor scaling rejects more than two arguments"
+grep -F 'Usage:' "$test_tmp/stderr" >/dev/null || fail "monitor scaling prints usage for extra arguments"
+[[ ! -e $eval_out ]] || fail "extra arguments are never eval'd"
+pass "monitor scaling rejects extra arguments"
+
+# The bare invocation keeps the monitor-state contract: exactly the focused
+# monitor's scale on stdout.
+scale=$(run_scaling)
+[[ $scale == "2" ]] || fail "bare scaling still reports the focused monitor's scale" "actual: $scale"
+pass "monitor scaling bare call reports the focused scale"
