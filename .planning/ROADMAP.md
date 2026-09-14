@@ -78,8 +78,8 @@ Phases execute in numeric order: 1 → 2
   3. The recomputed position is written to the target monitor's `hl.monitor()` rule and survives `hyprctl reload`
   4. `omarchy_gdk_scale` reflects `round(max(all monitor scales))` after any scale change, so scaling a secondary monitor cannot degrade XWayland sharpness on a denser primary
 
-**Plans**: 0 plans
+**Plans**: 1 plan
 
 Plans:
 
-- [ ] TBD (run /gsd-plan-phase 3 to break down)
+- [ ] 03-01-PLAN.md — scale-aware position recompute + persistence + max-scale GDK (4 tasks, 1 wave)
