@@ -773,7 +773,7 @@ Panel {
                 id: scaleMonitor
                 textFormat: Text.PlainText
                 text: root.ownScreenName + " · " + root.ownScale + "x"
-                visible: root.ownScreenName !== ""
+                visible: root.ownScreenName !== "" && root.ownScale !== ""
                 color: Qt.darker(root.bar.foreground, 1.4)
                 font.family: root.bar.fontFamily
                 font.pixelSize: Style.font.caption

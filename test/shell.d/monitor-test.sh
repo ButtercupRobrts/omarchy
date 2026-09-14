@@ -159,8 +159,8 @@ assert(
   'monitor panel scale header does not follow the focused monitor or display count'
 )
 assert(
-  scaleMonitorMatch[0].includes('visible: root.ownScreenName !== ""'),
-  'monitor panel scale header shows whenever the own screen is known'
+  scaleMonitorMatch[0].includes('visible: root.ownScreenName !== "" && root.ownScale !== ""'),
+  'monitor panel scale header shows only when the own screen and its scale are known'
 )
 
 const monitorRowTextMatch = panelQml.match(/text: monitorRow\.display\.name[^\n]*/)
