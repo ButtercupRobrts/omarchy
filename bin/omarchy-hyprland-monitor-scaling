@@ -290,16 +290,58 @@ persist_monitor_scale() {
         return d
       }
 
+      # The offset in block_nostr of the first `key =` pair at the top level of
+      # the monitor table, or 0 when the table has none. A key inside a nested
+      # table like extra = { scale = 99 } is not a key of the rule, so the scan
+      # tracks { } ( ) depth from the table constructor opening brace and
+      # only accepts keys at depth 1. Offsets align 1:1 with block_orig, so a
+      # hit splices straight back into the original text.
+      function top_level_key(key,   brace, i, n, d, c, prev, j) {
+        if (!match(block_nostr, /hl\.monitor[[:space:]]*\(/)) return 0
+        brace = index(substr(block_nostr, RSTART + RLENGTH - 1), "{")
+        if (brace == 0) return 0
+        brace += RSTART + RLENGTH - 2
+        d = 1
+        n = length(block_nostr)
+        for (i = brace + 1; i <= n && d > 0; i++) {
+          c = substr(block_nostr, i, 1)
+          if (c == "{" || c == "(") { d++; continue }
+          if (c == "}" || c == ")") { d--; continue }
+          if (d != 1) continue
+          prev = substr(block_nostr, i - 1, 1)
+          if (prev !~ /[{,;[:space:]]/) continue
+          if (substr(block_nostr, i, length(key)) != key) continue
+          j = i + length(key)
+          while (j <= n && substr(block_nostr, j, 1) ~ /[[:space:]]/) j++
+          if (substr(block_nostr, j, 1) != "=") continue
+          return i
+        }
+        return 0
+      }
+
+      # The first value char of the `key =` pair whose key starts at pos in
+      # block_nostr.
+      function value_start(pos,   j) {
+        j = pos
+        while (substr(block_nostr, j, 1) != "=") j++
+        j++
+        while (substr(block_nostr, j, 1) ~ /[[:space:]]/) j++
+        return j
+      }
+
       # The output selector of the block, read from the comment-blanked text at
       # offsets located in the string-blanked text so key-like text inside a
-      # string cannot pose as the output key.
-      function block_output(   q1, p, q2) {
-        if (!match(block_nostr, /[{,;[:space:]]output[[:space:]]*=[[:space:]]*"/)) return ""
-        q1 = RSTART + RLENGTH - 1
-        p = index(substr(block_nostr, q1 + 1), "\"")
+      # string cannot pose as the output key. Only the top-level output key of
+      # the monitor table counts; a nested one does not select the rule.
+      function block_output(   kstart, vstart, p, q2) {
+        kstart = top_level_key("output")
+        if (!kstart) return ""
+        vstart = value_start(kstart)
+        if (substr(block_nostr, vstart, 1) != "\"") return ""
+        p = index(substr(block_nostr, vstart + 1), "\"")
         if (p == 0) return ""
-        q2 = q1 + p
-        return substr(block_blank, q1 + 1, q2 - q1 - 1)
+        q2 = vstart + p
+        return substr(block_blank, vstart + 1, q2 - vstart - 1)
       }
 
       # Mirror of the Hyprland static selector: the literal connector name, or
@@ -319,14 +361,14 @@ persist_monitor_scale() {
         return 0
       }
 
-      # Rewrites the first scale = key in the block, or inserts one before the
-      # closing brace of the table. Positions come from the string-blanked
-      # text; the splice lands in the original so comments and strings survive
-      # the edit.
+      # Rewrites the top-level scale = key of the monitor table, or inserts one
+      # before the closing brace when the rule has none. Positions come from
+      # the string-blanked text; the splice lands in the original so comments
+      # and strings survive the edit.
       function rewrite_scale(   kstart, vstart, vend, i, j, c, insertion) {
-        if (match(block_nostr, /[{,;[:space:]]scale[[:space:]]*=[[:space:]]*/)) {
-          kstart = RSTART + 1
-          vstart = RSTART + RLENGTH
+        kstart = top_level_key("scale")
+        if (kstart) {
+          vstart = value_start(kstart)
           if (match(substr(block_nostr, vstart), /[,;}]/)) {
             vend = vstart + RSTART - 2
           } else {

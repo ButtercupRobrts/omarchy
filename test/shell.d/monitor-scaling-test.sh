@@ -138,6 +138,22 @@ hl.monitor({ output = "", mode = "preferred", position = "auto", scale = 1 })
 LUA
 }
 
+# A scale key inside a nested table is not the scale of the rule: only the
+# top-level scale may be rewritten.
+write_nested_scale_rule_config() {
+  cat >"$monitor_lua" <<'LUA'
+hl.monitor({ output = "eDP-1", extra = { scale = 99, top = 24 }, scale = 1.5 })
+LUA
+}
+
+# An output selector inside a nested table does not make the rule belong to
+# that output either.
+write_nested_output_rule_config() {
+  cat >"$monitor_lua" <<'LUA'
+hl.monitor({ extra = { output = "eDP-1" }, output = "DP-2", scale = 1.5 })
+LUA
+}
+
 # The literal catch-all only: the scale belongs on an appended named rule, not
 # on the rule every unlisted output shares.
 write_literal_catch_all_config() {
@@ -376,6 +392,26 @@ grep -Fx 'local s = [=[ hl.monitor({ output = "eDP-1", mode = "preferred", posit
 grep -Fx 'hl.monitor({ output = "eDP-1", mode = "2880x1800@120.0", position = "0x0", scale = 2 })' "$monitor_lua" >/dev/null ||
   fail "monitor scaling appends a named rule when only a long string names the output"
 pass "monitor scaling ignores a levelled-string rule and appends"
+
+# A scale key inside a nested table is not the scale of the rule: the
+# top-level scale is rewritten and the nested one stays byte-identical.
+write_nested_scale_rule_config
+run_scaling 2
+grep -Fx 'hl.monitor({ output = "eDP-1", extra = { scale = 99, top = 24 }, scale = 2 })' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling rewrites only the top-level scale of the rule"
+(( $(grep -c 'hl\.monitor' "$monitor_lua") == 1 )) ||
+  fail "monitor scaling rewrites a nested-scale rule in place"
+pass "monitor scaling rewrites only the top-level scale of the rule"
+
+# An output selector inside a nested table does not make the rule belong to
+# eDP-1: the DP-2 rule stays byte-identical and a named rule is appended.
+write_nested_output_rule_config
+run_scaling 2
+grep -Fx 'hl.monitor({ extra = { output = "eDP-1" }, output = "DP-2", scale = 1.5 })' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling does not take a nested output key as the selector of the rule"
+grep -Fx 'hl.monitor({ output = "eDP-1", mode = "2880x1800@120.0", position = "0x0", scale = 2 })' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling appends a named rule when only a nested table names the output"
+pass "monitor scaling ignores a nested table output selector"
 
 # A literal catch-all is never the persistence target either: the named
 # append wins over it and the catch-all stays byte-identical.
