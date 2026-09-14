@@ -9,10 +9,10 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Scaling Persistence
 
-- [ ] **SCALE-01**: A scale change for a monitor persists by updating that monitor's own `hl.monitor()` line in `~/.config/hypr/monitors.lua` — it survives `hyprctl reload` and reboot
-- [ ] **SCALE-02**: A live scale change preserves the monitor's configured position (e.g. `-1200x0`) instead of forcing `position = "auto"`
-- [ ] **SCALE-03**: Persistence still works when `monitors.lua` uses the stock `omarchy_monitor_scale` variable or literal catch-all (no regression for default configs)
-- [ ] **SCALE-04**: Persistence handles realistic `monitors.lua` shapes — multi-line `hl.monitor({...})` entries, `desc:` selectors, monitors without explicit scale
+- [x] **SCALE-01**: A scale change for a monitor persists by updating that monitor's own `hl.monitor()` line in `~/.config/hypr/monitors.lua` — it survives `hyprctl reload` and reboot
+- [x] **SCALE-02**: A live scale change preserves the monitor's configured position (e.g. `-1200x0`) instead of forcing `position = "auto"`
+- [x] **SCALE-03**: Persistence still works when `monitors.lua` uses the stock `omarchy_monitor_scale` variable or literal catch-all (no regression for default configs)
+- [x] **SCALE-04**: Persistence handles realistic `monitors.lua` shapes — multi-line `hl.monitor({...})` entries, `desc:` selectors, monitors without explicit scale
 
 ### Bar Panel
 
@@ -43,15 +43,16 @@ Deferred to future release. Tracked but not in current roadmap.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SCALE-01 | Phase 1 | Pending |
-| SCALE-02 | Phase 1 | Pending |
-| SCALE-03 | Phase 1 | Pending |
-| SCALE-04 | Phase 1 | Pending |
+| SCALE-01 | Phase 1 | Complete |
+| SCALE-02 | Phase 1 | Complete |
+| SCALE-03 | Phase 1 | Complete |
+| SCALE-04 | Phase 1 | Complete |
 | SCALE-05 | Phase 2 | Pending |
 | SCALE-06 | Phase 2 | Pending |
 | SCALE-07 | Phase 2 | Pending |
 
 **Coverage:**
+
 - v1 requirements: 7 total
 - Mapped to phases: 7
 - Unmapped: 0 ✓

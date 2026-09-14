@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 1
 current_phase_name: Per-monitor scale persistence in the scaling CLI
 status: executing
-stopped_at: Phase 1 context gathered
-last_updated: "2026-09-14T09:31:51.555Z"
+stopped_at: Completed 01-01-PLAN.md
+last_updated: "2026-09-14T10:13:17.853Z"
 last_activity: 2026-09-14
-last_activity_desc: Roadmap created after initialization
-state_head: 4b5e32c5760b47ab69657ede05645d5eb43a02f7
+last_activity_desc: Executed 01-01 — per-monitor scale persistence via hl.monitor() rule rewrite
+state_head: c31b17aef8739c0208ce823ebbd2f2e2106de7fa
 progress:
   total_phases: 2
   completed_phases: 0
   total_plans: 1
-  completed_plans: 0
+  completed_plans: 1
   percent: 0
 ---
 
@@ -27,10 +27,10 @@ See: .planning/PROJECT.md (updated 2026-09-14)
 
 ## Current Position
 
-Phase: 1 (Per-monitor scale persistence in the scaling CLI) — READY TO EXECUTE
-Plan: 0 of 1 in current phase
-Status: Ready to execute
-Last activity: 2026-09-14 — Roadmap created after initialization
+Phase: 1 (Per-monitor scale persistence in the scaling CLI) — EXECUTION COMPLETE
+Plan: 1 of 1 in current phase (01-01 executed, summarized, committed)
+Status: Phase 1 plans done — ready for /gsd-verify-work 1 and /gsd-plan-phase 2
+Last activity: 2026-09-14 — Executed 01-01: per-monitor scale persistence via hl.monitor() rule rewrite
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -38,22 +38,27 @@ Progress: [░░░░░░░░░░] 0%
 
 **Velocity:**
 
-- Total plans completed: 0
-- Average duration: -
-- Total execution time: 0 hours
+- Total plans completed: 1
+- Average duration: 23 min
+- Total execution time: 0.4 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| - | - | - | - |
+| 1 | 1 | 23 min | 23 min |
 
 **Recent Trend:**
 
-- Last 5 plans: -
+- Last 5 plans: P01 (23 min)
 - Trend: -
 
 *Updated after each plan completion*
+**Per-Plan Metrics:**
+
+| Plan | Duration | Tasks | Files |
+|------|----------|-------|-------|
+| Phase 1 P01 | 23 min | 4 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -65,6 +70,7 @@ Recent decisions affecting current work:
 - [Init]: Two-phase split (CLI fix, then panel UI) — Omarchy requires atomic single-concern changes; maps to two potential upstream PRs
 - [Init]: Independent implementation, not building on PR #11414 — standalone change is more reviewable
 - [Init]: Panel reads `hyprctl monitors -j` itself for per-display scale rather than rewriting `omarchy-monitor-state`'s positional contract
+- [Phase 1]: Per-monitor persistence: the target monitor's own hl.monitor() rule is the system of record (in-place rewrite or single-line append); the shared omarchy_monitor_scale variable and output="" catch-all are never written for a targeted monitor — awk rewriter blanks comments and string contents at stable byte offsets, matches output by name or desc: prefix against description/make-model-serial, splices scale into original text; exit 0 rewrote, 3 append; identity via ENVIRON never -v
 
 ### Pending Todos
 
@@ -73,7 +79,8 @@ None yet.
 ### Blockers/Concerns
 
 - Phase 2 depends on Phase 1: the panel must call a CLI that persists correctly
-- `monitor-clamshell-scale-test.sh` and related `test/shell.d/` suites must stay green (regression risk in Phase 1)
+- `./test/shell` has 7 pre-existing environmental failures (bar-icon-geometry, config, locate, runtime-smoke, screenshot-sanity, snapper, unowned-system-paths) — all reproduce at base commit 41b7ea3d in a clean worktree; unrelated to Phase 1 changes
+- Focused suites green: monitor-scaling (30 cases), monitor-state, monitor-clamshell-scale, monitor-output-name; `./test/cli` exit 0
 
 ## Deferred Items
 
@@ -85,6 +92,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-14T08:31:41.905Z
-Stopped at: Phase 1 context gathered
-Resume file: .planning/phases/01-per-monitor-scale-persistence-in-the-scaling-cli/01-CONTEXT.md
+Last session: 2026-09-14T10:13:17.835Z
+Stopped at: Completed 01-01-PLAN.md
+Resume file: None
