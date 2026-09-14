@@ -60,6 +60,82 @@ hl.monitor({ output = "eDP-1", mode = "preferred", position = "auto", scale = 1.
 LUA
 }
 
+# A named rule that hands its scale to the shared variable: targeting pins the
+# rule to a literal while the variable itself is left alone.
+write_named_var_rule_config() {
+  cat >"$monitor_lua" <<'LUA'
+local omarchy_gdk_scale = 2
+local omarchy_monitor_scale = 1.5
+hl.monitor({ output = "eDP-1", mode = "preferred", position = "auto", scale = omarchy_monitor_scale })
+LUA
+}
+
+# The nwg-displays shape: a rule spread over several lines. Only the scale
+# line may change; every other line stays byte-identical.
+write_multiline_rule_config() {
+  cat >"$monitor_lua" <<'LUA'
+hl.monitor({
+  output = "eDP-1",
+  mode = "preferred",
+  position = "auto",
+  scale = 1.5
+})
+LUA
+}
+
+# A transform-only rule names no scale at all, so one is inserted inside the
+# closing brace rather than appended as a new rule.
+write_scaleless_rule_config() {
+  cat >"$monitor_lua" <<'LUA'
+hl.monitor({ output = "eDP-1", mode = "preferred", position = "auto", transform = 1 })
+hl.monitor({ output = "", mode = "preferred", position = "auto", scale = 1 })
+LUA
+}
+
+# A rule keyed by a desc: selector (with stray spaces, as Hyprland tolerates)
+# that prefix-matches the stubbed monitor description.
+write_desc_rule_config() {
+  cat >"$monitor_lua" <<'LUA'
+hl.monitor({ output = "desc:  Acme  ", mode = "preferred", position = "auto", scale = 1.5 })
+hl.monitor({ output = "", mode = "preferred", position = "auto", scale = 1 })
+LUA
+}
+
+# A rule that only exists inside a line comment is not a rule.
+write_commented_rule_config() {
+  cat >"$monitor_lua" <<'LUA'
+-- hl.monitor({ output = "eDP-1", mode = "preferred", position = "auto", scale = 1.5 })
+hl.monitor({ output = "", mode = "preferred", position = "auto", scale = 1 })
+LUA
+}
+
+# Nor is one fenced inside a multi-line --[[ ]] block comment.
+write_block_comment_rule_config() {
+  cat >"$monitor_lua" <<'LUA'
+--[[
+hl.monitor({ output = "eDP-1", mode = "preferred", position = "auto", scale = 1.5 })
+]]
+hl.monitor({ output = "", mode = "preferred", position = "auto", scale = 1 })
+LUA
+}
+
+# The literal catch-all only: the scale belongs on an appended named rule, not
+# on the rule every unlisted output shares.
+write_literal_catch_all_config() {
+  cat >"$monitor_lua" <<'LUA'
+hl.monitor({ output = "", mode = "preferred", position = "auto", scale = 1 })
+LUA
+}
+
+# A rule for a different monitor plus the catch-all, while the target is
+# unlisted: only the append may happen.
+write_other_monitor_config() {
+  cat >"$monitor_lua" <<'LUA'
+hl.monitor({ output = "HDMI-A-1", mode = "preferred", position = "-1200x0", scale = 1.6 })
+hl.monitor({ output = "", mode = "preferred", position = "auto", scale = 1 })
+LUA
+}
+
 run_scaling() {
   HOME="$home_dir" \
     XDG_STATE_HOME="$home_dir/.local/state" \
@@ -193,3 +269,112 @@ grep -Fx 'hl.monitor({ output = "", mode = "preferred", position = "auto", scale
 grep -Fx 'local omarchy_monitor_scale = 2' "$monitor_lua" >/dev/null ||
   fail "monitor scaling leaves the shared scale variable alone"
 pass "monitor scaling rewrites the monitor's own hl.monitor rule"
+
+# A named rule that references the shared variable gets the literal new scale;
+# the variable itself is not the persistence target anymore.
+write_named_var_rule_config
+run_scaling 2
+grep -Fx 'hl.monitor({ output = "eDP-1", mode = "preferred", position = "auto", scale = 2 })' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling pins a variable-referencing rule to the new scale"
+grep -Fx 'local omarchy_monitor_scale = 1.5' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling leaves the shared scale variable alone"
+(( $(grep -c 'hl\.monitor' "$monitor_lua") == 1 )) ||
+  fail "monitor scaling rewrites in place rather than appending a second rule"
+pass "monitor scaling pins a variable-referencing rule to the new scale"
+
+# A multi-line rule is rewritten inside its block; every other line stays
+# byte-identical.
+write_multiline_rule_config
+run_scaling 2
+grep -Fx '  scale = 2' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling rewrites the scale line inside a multi-line rule"
+grep -Fx '  output = "eDP-1",' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling leaves the other lines of a multi-line rule alone"
+grep -Fx 'hl.monitor({' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling leaves the opening line of a multi-line rule alone"
+(( $(grep -c 'hl\.monitor' "$monitor_lua") == 1 )) ||
+  fail "monitor scaling rewrites a multi-line rule in place"
+pass "monitor scaling rewrites a multi-line rule in place"
+
+# A rule without a scale key gets one inserted inside the closing brace, not
+# appended as a separate line.
+write_scaleless_rule_config
+run_scaling 2
+grep -Fx 'hl.monitor({ output = "eDP-1", mode = "preferred", position = "auto", transform = 1, scale = 2 })' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling inserts scale into a rule that has none"
+(( $(grep -c 'hl\.monitor' "$monitor_lua") == 2 )) ||
+  fail "monitor scaling inserts into the rule rather than appending a new line"
+pass "monitor scaling inserts scale into a rule that has none"
+
+# A desc:-keyed rule whose trimmed selector prefix-matches the monitor
+# description is rewritten in place, selector preserved.
+write_desc_rule_config
+OMARCHY_TEST_MONITOR_DESCRIPTION="Acme Display 3000" run_scaling 2
+grep -Fx 'hl.monitor({ output = "desc:  Acme  ", mode = "preferred", position = "auto", scale = 2 })' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling rewrites a desc:-keyed rule in place"
+(( $(grep -c 'hl\.monitor' "$monitor_lua") == 2 )) ||
+  fail "monitor scaling rewrites a desc: rule rather than appending"
+pass "monitor scaling rewrites a desc:-keyed rule in place"
+
+# A rule that only exists inside a line comment is not a rule: it is left
+# alone and the monitor gets an appended named line instead.
+write_commented_rule_config
+run_scaling 2
+grep -Fx -- '-- hl.monitor({ output = "eDP-1", mode = "preferred", position = "auto", scale = 1.5 })' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling leaves a commented-out rule alone"
+grep -Fx 'hl.monitor({ output = "eDP-1", mode = "2880x1800@120.0", position = "0x0", scale = 2 })' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling appends a named rule when only a comment names the output"
+pass "monitor scaling ignores a commented-out rule and appends"
+
+# Same for a rule fenced inside a multi-line --[[ ]] block comment.
+write_block_comment_rule_config
+run_scaling 2
+grep -Fx 'hl.monitor({ output = "eDP-1", mode = "preferred", position = "auto", scale = 1.5 })' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling leaves a block-commented rule alone"
+grep -Fx 'hl.monitor({ output = "eDP-1", mode = "2880x1800@120.0", position = "0x0", scale = 2 })' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling appends a named rule when only a block comment names the output"
+pass "monitor scaling ignores a block-commented rule and appends"
+
+# A literal catch-all is never the persistence target either: the named
+# append wins over it and the catch-all stays byte-identical.
+write_literal_catch_all_config
+run_scaling 2
+grep -Fx 'hl.monitor({ output = "eDP-1", mode = "2880x1800@120.0", position = "0x0", scale = 2 })' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling appends a named rule over a literal catch-all"
+grep -Fx 'hl.monitor({ output = "", mode = "preferred", position = "auto", scale = 1 })' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling leaves the literal catch-all byte-identical"
+pass "monitor scaling appends a named rule over a literal catch-all"
+
+# An unlisted target with another monitor's rule present appends only; the
+# other rule stays byte-identical.
+write_other_monitor_config
+run_scaling 2
+grep -Fx 'hl.monitor({ output = "eDP-1", mode = "2880x1800@120.0", position = "0x0", scale = 2 })' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling appends a rule for the unlisted target"
+grep -Fx 'hl.monitor({ output = "HDMI-A-1", mode = "preferred", position = "-1200x0", scale = 1.6 })' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling leaves the other monitor's rule byte-identical"
+pass "monitor scaling appends a rule for the unlisted target"
+
+# Every write leaves a timestamped backup of the pre-run content.
+write_named_rule_config
+rm -f "$monitor_lua".bak.*
+cp -- "$monitor_lua" "$test_tmp/pre-run.lua"
+run_scaling 2
+backup=$(compgen -G "$monitor_lua.bak.*") ||
+  fail "monitor scaling writes a timestamped backup"
+(( $(compgen -G "$monitor_lua.bak.*" | wc -l) == 1 )) ||
+  fail "monitor scaling writes exactly one backup per run"
+cmp -s "$backup" "$test_tmp/pre-run.lua" ||
+  fail "monitor scaling backup preserves the pre-run content"
+pass "monitor scaling backs up monitors.lua before writing"
+
+# A symlinked monitors.lua stays a symlink and the write lands through it.
+write_named_rule_config
+real_lua="$home_dir/.config/hypr/monitors-real.lua"
+mv "$monitor_lua" "$real_lua"
+ln -s "$real_lua" "$monitor_lua"
+run_scaling 2
+[[ -L $monitor_lua ]] || fail "monitor scaling keeps a symlinked monitors.lua a symlink"
+grep -Fx 'hl.monitor({ output = "eDP-1", mode = "preferred", position = "auto", scale = 2 })' "$real_lua" >/dev/null ||
+  fail "monitor scaling writes through the symlink to the real file"
+pass "monitor scaling writes through a symlinked monitors.lua"
