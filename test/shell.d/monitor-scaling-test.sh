@@ -745,3 +745,220 @@ set -e
 (( status == 0 )) || fail "recompute returns success for a single monitor"
 [[ $pos == "0x0 unchanged -" ]] || fail "recompute leaves a single monitor at its live position" "actual: $pos"
 pass "recompute leaves a single monitor unchanged"
+
+# A right-of monitor keeps its left edge pinned to the neighbor's right edge
+# and extends right as it grows.
+monitors_json='[{"name":"eDP-1","x":0,"y":0,"width":2880,"height":1800,"scale":2},{"name":"HDMI-A-1","x":1440,"y":0,"width":1920,"height":1080,"scale":1.6}]'
+set +e
+pos=$(recompute_monitor_position "$monitors_json" "HDMI-A-1" 2)
+status=$?
+set -e
+(( status == 0 )) || fail "recompute returns success for a right-of monitor"
+[[ $pos == "1440x0 adjacency -" ]] || fail "recompute pins the left edge of a right-of monitor" "actual: $pos"
+pass "recompute pins the left edge of a right-of monitor"
+
+# A monitor stacked above keeps its bottom edge pinned to the neighbor's top
+# edge (540-tall after 1080/2 -> y = 675 - 540 = 135).
+monitors_json='[{"name":"eDP-1","x":0,"y":675,"width":2880,"height":1800,"scale":2},{"name":"HDMI-A-1","x":0,"y":0,"width":1920,"height":1080,"scale":1.6}]'
+set +e
+pos=$(recompute_monitor_position "$monitors_json" "HDMI-A-1" 2)
+status=$?
+set -e
+(( status == 0 )) || fail "recompute returns success for an above monitor"
+[[ $pos == "0x135 adjacency -" ]] || fail "recompute keeps an above monitor touching" "actual: $pos"
+pass "recompute keeps an above-adjacent monitor touching"
+
+# A monitor stacked below keeps its top edge pinned to the neighbor's bottom
+# edge; only its height shrinks.
+monitors_json='[{"name":"eDP-1","x":0,"y":0,"width":2880,"height":1800,"scale":2},{"name":"HDMI-A-1","x":0,"y":900,"width":1920,"height":1080,"scale":1.6}]'
+set +e
+pos=$(recompute_monitor_position "$monitors_json" "HDMI-A-1" 2)
+status=$?
+set -e
+(( status == 0 )) || fail "recompute returns success for a below monitor"
+[[ $pos == "0x900 adjacency -" ]] || fail "recompute keeps a below monitor touching" "actual: $pos"
+pass "recompute keeps a below-adjacent monitor touching"
+
+# Near-touching edges within the 5px tolerance normalize to touching: a 5px
+# gap and a 5px overlap both pull to -960x0 at scale 2.
+for live_x in -1205 -1195 -1201 -1199; do
+  monitors_json="[{\"name\":\"eDP-1\",\"x\":0,\"y\":0,\"width\":2880,\"height\":1800,\"scale\":2},{\"name\":\"HDMI-A-1\",\"x\":${live_x},\"y\":0,\"width\":1920,\"height\":1080,\"scale\":1.6}]"
+  set +e
+  pos=$(recompute_monitor_position "$monitors_json" "HDMI-A-1" 2)
+  status=$?
+  set -e
+  (( status == 0 )) || fail "recompute returns success at live_x=$live_x"
+  [[ $pos == "-960x0 adjacency -" ]] || fail "recompute normalizes a near-touching edge at live_x=$live_x" "actual: $pos"
+done
+pass "recompute normalizes edges within the 5px tolerance"
+
+# One step outside the tolerance in either direction is a deliberate layout:
+# the coordinate is preserved verbatim.
+for live_x in -1206 -1194; do
+  monitors_json="[{\"name\":\"eDP-1\",\"x\":0,\"y\":0,\"width\":2880,\"height\":1800,\"scale\":2},{\"name\":\"HDMI-A-1\",\"x\":${live_x},\"y\":0,\"width\":1920,\"height\":1080,\"scale\":1.6}]"
+  set +e
+  pos=$(recompute_monitor_position "$monitors_json" "HDMI-A-1" 2)
+  status=$?
+  set -e
+  (( status == 0 )) || fail "recompute returns success at live_x=$live_x"
+  [[ $pos == "${live_x}x0 unchanged -" ]] || fail "recompute preserves an edge beyond the tolerance at live_x=$live_x" "actual: $pos"
+done
+pass "recompute preserves edges beyond the 5px tolerance"
+
+# A neighbor whose reported scale carries float noise (1.3333334 -> logical
+# width 1440.0000x) still counts as adjacent after logical dims round.
+monitors_json='[{"name":"DP-2","x":0,"y":0,"width":1920,"height":1080,"scale":1.3333334},{"name":"HDMI-A-1","x":1440,"y":0,"width":1920,"height":1080,"scale":1.6}]'
+set +e
+pos=$(recompute_monitor_position "$monitors_json" "HDMI-A-1" 2)
+status=$?
+set -e
+(( status == 0 )) || fail "recompute returns success beside a float-noise neighbor"
+[[ $pos == "1440x0 adjacency -" ]] || fail "recompute sees adjacency through reported-scale float noise" "actual: $pos"
+pass "recompute sees adjacency through reported-scale float noise"
+
+# Sandwiched between two neighbors with unequal shared edges, the larger one
+# wins (240 = 1200 - 960) and the sacrificed side lands in the dropped field.
+monitors_json='[{"name":"DP-1","x":-800,"y":0,"width":800,"height":600,"scale":1},{"name":"HDMI-A-1","x":0,"y":0,"width":1920,"height":1080,"scale":1.6},{"name":"eDP-1","x":1200,"y":0,"width":1920,"height":1080,"scale":1}]'
+set +e
+pos=$(recompute_monitor_position "$monitors_json" "HDMI-A-1" 2)
+status=$?
+set -e
+(( status == 0 )) || fail "recompute returns success for a sandwich"
+[[ $pos == "240x0 adjacency right-of" ]] || fail "recompute anchors a sandwich to the largest shared edge" "actual: $pos"
+pass "recompute anchors a sandwich to the largest shared edge"
+
+# On a tie the target's own top-left edge stays fixed: the right-of candidate
+# (x = 0, the live position) wins and the sacrificed left-of is recorded.
+monitors_json='[{"name":"DP-1","x":-800,"y":0,"width":800,"height":675,"scale":1},{"name":"HDMI-A-1","x":0,"y":0,"width":1920,"height":1080,"scale":1.6},{"name":"eDP-1","x":1200,"y":0,"width":1920,"height":1080,"scale":1}]'
+set +e
+pos=$(recompute_monitor_position "$monitors_json" "HDMI-A-1" 2)
+status=$?
+set -e
+(( status == 0 )) || fail "recompute returns success for a tied sandwich"
+[[ $pos == "0x0 adjacency left-of" ]] || fail "recompute ties a sandwich toward the top-left edge" "actual: $pos"
+pass "recompute ties a sandwich toward the top-left edge"
+
+# Two different neighbors touching the same edge both lose to the larger
+# right-side share, but the sacrificed side is listed once.
+monitors_json='[{"name":"DP-1","x":-800,"y":0,"width":800,"height":400,"scale":1},{"name":"DP-2","x":-500,"y":400,"width":500,"height":275,"scale":1},{"name":"HDMI-A-1","x":0,"y":0,"width":1920,"height":1080,"scale":1.6},{"name":"eDP-1","x":1200,"y":0,"width":1920,"height":1080,"scale":1}]'
+set +e
+pos=$(recompute_monitor_position "$monitors_json" "HDMI-A-1" 2)
+status=$?
+set -e
+(( status == 0 )) || fail "recompute returns success for a doubled-up edge"
+[[ $pos == "240x0 adjacency right-of" ]] || fail "recompute dedupes a sacrificed side shared by two neighbors" "actual: $pos"
+pass "recompute dedupes a sacrificed side shared by two neighbors"
+
+# A recompute whose picked position would overlap a third monitor (DP-1)
+# aborts to the live coordinates: never a worse state than doing nothing.
+monitors_json='[{"name":"eDP-1","x":0,"y":0,"width":2880,"height":1800,"scale":2},{"name":"HDMI-A-1","x":-1200,"y":0,"width":1920,"height":1080,"scale":1.6},{"name":"DP-1","x":-2000,"y":0,"width":790,"height":400,"scale":1},{"name":"DP-2","x":-1100,"y":675,"width":1100,"height":800,"scale":1}]'
+set +e
+pos=$(recompute_monitor_position "$monitors_json" "HDMI-A-1" 1.5)
+status=$?
+set -e
+(( status == 0 )) || fail "recompute aborts in-band, not by status"
+[[ $pos == "-1200x0 abort -" ]] || fail "recompute aborts to live coords on a new overlap" "actual: $pos"
+pass "recompute aborts to live coords on a new overlap"
+
+# A floating monitor whose growth would overlap a non-adjacent neighbor gets
+# the smallest separating move: -1280 (delta 30) beats 1440 (delta 2690).
+monitors_json='[{"name":"eDP-1","x":0,"y":0,"width":2880,"height":1800,"scale":2},{"name":"HDMI-A-1","x":-1250,"y":0,"width":1920,"height":1080,"scale":1.6}]'
+set +e
+pos=$(recompute_monitor_position "$monitors_json" "HDMI-A-1" 1.5)
+status=$?
+set -e
+(( status == 0 )) || fail "recompute returns success for a growth clamp"
+[[ $pos == "-1280x0 clamp -" ]] || fail "recompute clamps growth into a non-adjacent monitor" "actual: $pos"
+pass "recompute clamps growth into a non-adjacent monitor"
+
+# A portrait target (transform = 1) swaps its pixel axes before scaling:
+# 1080/2 = 540 logical width, so the pinned right edge lands at -540x0.
+monitors_json='[{"name":"eDP-1","x":0,"y":0,"width":2880,"height":1800,"scale":2},{"name":"HDMI-A-1","x":-675,"y":0,"width":1920,"height":1080,"scale":1.6,"transform":1}]'
+set +e
+pos=$(recompute_monitor_position "$monitors_json" "HDMI-A-1" 2)
+status=$?
+set -e
+(( status == 0 )) || fail "recompute returns success for a portrait target"
+[[ $pos == "-540x0 adjacency -" ]] || fail "recompute swaps a portrait target's axes" "actual: $pos"
+pass "recompute swaps a portrait target's axes"
+
+# A portrait neighbor's swapped width feeds the adjacency math: 1920 logical
+# wide, so the right-of target keeps x = 1920.
+monitors_json='[{"name":"DP-2","x":0,"y":0,"width":1080,"height":1920,"scale":1,"transform":1},{"name":"HDMI-A-1","x":1920,"y":0,"width":1920,"height":1080,"scale":1.6}]'
+set +e
+pos=$(recompute_monitor_position "$monitors_json" "HDMI-A-1" 2)
+status=$?
+set -e
+(( status == 0 )) || fail "recompute returns success beside a portrait neighbor"
+[[ $pos == "1920x0 adjacency -" ]] || fail "recompute swaps a portrait neighbor's axes" "actual: $pos"
+pass "recompute swaps a portrait neighbor's axes"
+
+# A target absent from the monitor array is unusable input: non-zero status
+# (never an exit -- this file is sourced) and no output line.
+monitors_json='[{"name":"eDP-1","x":0,"y":0,"width":2880,"height":1800,"scale":2}]'
+set +e
+pos=$(recompute_monitor_position "$monitors_json" "DP-9" 2)
+status=$?
+set -e
+(( status != 0 )) || fail "recompute rejects a target absent from the monitor array"
+[[ -z $pos ]] || fail "recompute prints nothing for an absent target" "actual: $pos"
+pass "recompute rejects a target absent from the monitor array"
+
+# --- end-to-end: atomic eval, verify-read, and audit fields ---------------
+
+# Scale and the recomputed position ride in a single eval call: the capture
+# file holds exactly one line carrying both fields.
+write_monitor_config
+rm -f "$eval_out" "$scale_log"
+OMARCHY_TEST_EXTERNAL_MONITOR=1 run_scaling 2.5 HDMI-A-1
+(( $(wc -l <"$eval_out") == 1 )) || fail "monitor scaling applies scale and position in one eval"
+grep -Fx 'hl.monitor({ output = "HDMI-A-1", mode = "1920x1080@144.0", position = "-768x0", scale = 2.5 })' "$eval_out" >/dev/null ||
+  fail "monitor scaling evals scale and recomputed position together"
+pass "monitor scaling applies scale and position in one atomic eval"
+
+# The post-eval verify-read catches an applied scale that diverges from the
+# computed one: the stub serves scale 1.9 after the eval, and the audit line
+# carries note=scale-divergence with pos= and note= appended at line end.
+write_monitor_config
+rm -f "$eval_out" "$scale_log"
+OMARCHY_TEST_MONITORS_JSON='[{"name":"eDP-1","focused":true,"scale":2,"width":2880,"height":1800,"refreshRate":120.0,"x":0,"y":0,"transform":0}]' \
+OMARCHY_TEST_MONITORS_JSON_AFTER_EVAL='[{"name":"eDP-1","focused":true,"scale":1.9,"width":2880,"height":1800,"refreshRate":120.0,"x":0,"y":0,"transform":0}]' \
+  run_scaling 2.5 eDP-1
+grep -F 'note=scale-divergence' "$scale_log" >/dev/null ||
+  fail "monitor scaling audits an applied scale that diverges from the computed one"
+grep -E $'\tpos=0x0\tnote=scale-divergence$' "$scale_log" >/dev/null ||
+  fail "monitor scaling appends pos= and note= after grandparent= at line end"
+pass "monitor scaling audits a diverged applied scale"
+
+# A recompute that would create a new overlap aborts to the live position:
+# the eval replays -1200x0 and the audit log records pos=-1200x0 note=abort.
+write_monitor_config
+rm -f "$eval_out" "$scale_log"
+OMARCHY_TEST_MONITORS_JSON='[{"name":"eDP-1","focused":true,"x":0,"y":0,"width":2880,"height":1800,"scale":2,"refreshRate":120.0},{"name":"HDMI-A-1","focused":false,"x":-1200,"y":0,"width":1920,"height":1080,"scale":1.6,"refreshRate":144.0},{"name":"DP-1","focused":false,"x":-2000,"y":0,"width":790,"height":400,"scale":1,"refreshRate":60.0},{"name":"DP-2","focused":false,"x":-1100,"y":675,"width":1100,"height":800,"scale":1,"refreshRate":60.0}]' \
+  run_scaling 1.5 HDMI-A-1
+grep -F 'position = "-1200x0"' "$eval_out" >/dev/null || fail "monitor scaling aborts to the live position in the eval"
+grep -F 'pos=-1200x0' "$scale_log" >/dev/null || fail "monitor scaling audits the live position on abort"
+grep -F 'note=abort' "$scale_log" >/dev/null || fail "monitor scaling audits an aborted recompute"
+pass "monitor scaling audits a recompute abort"
+
+# A sandwiched monitor records the sacrificed adjacency side in the audit
+# log: keeping the larger left-of edge drops the right-of neighbor.
+write_monitor_config
+rm -f "$eval_out" "$scale_log"
+OMARCHY_TEST_MONITORS_JSON='[{"name":"DP-1","focused":false,"x":-800,"y":0,"width":800,"height":600,"scale":1,"refreshRate":60.0},{"name":"HDMI-A-1","focused":false,"x":0,"y":0,"width":1920,"height":1080,"scale":1.6,"refreshRate":144.0},{"name":"eDP-1","focused":true,"x":1200,"y":0,"width":1920,"height":1080,"scale":1,"refreshRate":120.0}]' \
+  run_scaling 2 HDMI-A-1
+grep -F 'note=adjacency,drop-right-of' "$scale_log" >/dev/null ||
+  fail "monitor scaling audits the sacrificed adjacency side"
+grep -F 'pos=240x0' "$scale_log" >/dev/null || fail "monitor scaling audits the recomputed position"
+pass "monitor scaling audits a sacrificed adjacency side"
+
+# A rotated target keeps its transform in the eval and on the appended rule
+# instead of being silently un-rotated.
+write_monitor_config
+rm -f "$eval_out"
+OMARCHY_TEST_MONITORS_JSON='[{"name":"eDP-1","focused":true,"scale":1,"width":1920,"height":1080,"refreshRate":120.0,"x":0,"y":0,"transform":1,"description":"BOE","make":"BOE","model":"X","serial":"0x1"}]' \
+  run_scaling 2 eDP-1
+grep -F 'transform = 1' "$eval_out" >/dev/null || fail "monitor scaling replays a nonzero transform in the eval"
+grep -Fx 'hl.monitor({ output = "eDP-1", mode = "1920x1080@120.0", position = "0x0", scale = 2, transform = 1 })' "$monitor_lua" >/dev/null ||
+  fail "monitor scaling persists transform on an appended rule"
+pass "monitor scaling replays and persists a nonzero transform"
