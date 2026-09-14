@@ -2,13 +2,13 @@
 gsd_state_version: "1.0"
 current_phase: 2
 status: executing
-stopped_at: Completed 02-01-PLAN.md
-last_updated: "2026-09-14T15:32:12.869Z"
+stopped_at: Phase 3 context gathered
+last_updated: "2026-09-14T17:31:28.212Z"
 last_activity: 2026-09-14
 last_activity_desc: Phase 2 marked complete
-state_head: 19df93dbf668449e51aaef7657b1cb89f188da57
+state_head: fd2fe9338b6fe9adff0573f8df9b4a233b04f78b
 progress:
-  total_phases: 2
+  total_phases: 3
   completed_phases: 0
   total_plans: 2
   completed_plans: 2
@@ -77,6 +77,10 @@ Recent decisions affecting current work:
 - [Phase 2]: Own-screen identity via bound QsWindow attached property (ownWindow/ownScreenName) with parallel ownDisplay()/ownScale — focusedMonitor/monitorScale keep focused semantics for brightness argv and stateIpc, never repurposed
 - [Phase 2]: setScale uses direct argv (no bash -c), appending ownScreenName only when non-empty; SCALE header reads `ownScreenName · ownScalex` ungated by display count (D-03); DISPLAYS rows append `· N.Nx` gated on enabled + non-empty normalization (D-01); non-preset current scale surfaces via Model.scalesWithCurrent sorted-insert pill (D-04)
 
+### Roadmap Evolution
+
+- Phase 3 added: Scale-aware monitor position adjustment — UAT found that fixed logical coordinates become overlapping when an edge-adjacent monitor's scale changes (Samsung at `-1200x0` overlapped eDP-1 after 1.6 → 1.5/1.25)
+
 ### Pending Todos
 
 None yet.
@@ -99,6 +103,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-14T13:46:00.000Z
-Stopped at: Completed 02-01-PLAN.md
-Resume file: None
+Last session: 2026-09-14T17:31:28.149Z
+Stopped at: Phase 3 context gathered
+Resume file: .planning/phases/03-scale-aware-monitor-position-adjustment/03-CONTEXT.md
