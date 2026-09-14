@@ -82,4 +82,4 @@ Phases execute in numeric order: 1 → 2
 
 Plans:
 
-- [ ] 03-01-PLAN.md — scale-aware position recompute + persistence + max-scale GDK (4 tasks, 1 wave)
+- [x] 03-01-PLAN.md — scale-aware position recompute + persistence + max-scale GDK (4 tasks, 1 wave)
