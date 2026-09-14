@@ -105,6 +105,52 @@ The apply path simplifies to direct argv — `["omarchy-hyprland-monitor-scaling
 7. **DISPLAYS row (D-01)** — `MonitorRow` name text → `display.name + (display.scale ? " · " + Model.normalizeScale(display.scale) + "x" : "") + (display.focused ? " · focused" : "")` — preserves click-to-toggle (D-02) and the `displays.length > 1` gate (SCALE-07).
 8. **Verify** — `bash test/shell.d/monitor-test.sh`, `monitor-state-test.sh`, `monitor-scaling-test.sh`, `./test/cli`; then `omarchy-restart-shell` + screenshots on both monitors (eDP-1@1.5 exercises the dynamic pill; HDMI-A-1@1.6 exercises targeting + position preservation end-to-end).
 
+## Validation Architecture
+
+### Verifiable headlessly (no compositor)
+
+- **`Model.js` pure helpers** — `run_node_test` + `requireFromRoot('shell/plugins/panels/monitor/Model.js')` in `test/shell.d/monitor-test.sh` (`base-test.sh:79-127`; existing cases at `:15-55` are the pattern). New coverage needed: `scalesWithCurrent(scales, currentScale, width, height)` — unchanged array when `matchingScaleIndex` finds a match, sorted numeric insertion when it doesn't, zero-dim guard; the own-display lookup (`findDisplay(displays, name)`-style helper with focused-display fallback) — name match wins, empty name falls back to `focused`, no match falls back safely; `parseDisplays` fixtures at `:60-77` gain `scale` fields proving the additive field passes through verbatim. Any new helper must also be added to the guarded `module.exports` block (`Model.js:114-123`).
+- **State JSON shape** — `test/shell.d/monitor-state-test.sh` stubs `hyprctl monitors all -j` by cat-ing fixture files verbatim (`:14-30`), so fixtures (`:59-80`) must gain `"scale":N` per monitor and the byte-for-byte line-7 assertions (`:112-116`) must gain `,"scale":N` in jq projection order (name, enabled, focused, width, height, **scale** — lands last). A fixture omitting `scale` yields `"scale":null`, a cheap regression case. `assert_line_count` (`:52-57`) pins the 8-line contract unchanged. Update in the same commit as the jq edit — breakage is guaranteed otherwise.
+- **Textual QML assertions** — established pattern: `fs.readFileSync(path.join(root, '.../Panel.qml'))` inside the Node heredoc, regex-extracting function bodies (`app-search-test.sh:8-11, 82-113`; `TESTING.md:90-91`). Can pin without a compositor: `ownScreenName` sources from `QsWindow.window.screen` (not `focusedMonitor`); `setScale` builds argv `["omarchy-hyprland-monitor-scaling", String(scale), ownScreenName]` with no `"bash", "-c"` wrapper; `scaleMonitor` binds `ownScreenName + " · " + ownScale` (D-03); `MonitorRow` text interpolates `display.scale` (SCALE-06); `displays.length > 1` gate survives (SCALE-07).
+- **Tree-wide static guards that will catch Phase 2 mistakes for free:** `qml-text-format-test.sh` runs `qml-text-format-scan.py` over the whole tree — every new `Text` binding interpolating `display.scale`/`ownScale` must declare `textFormat: Text.PlainText` (existing rows already do: `Panel.qml:754, :895, :906`); `panel-command-path-test.sh` rejects bar-path resolution in panels — direct argv keeps it green; `bash -n bin/omarchy-monitor-state` as a syntax smoke (the real script is exercised end-to-end by monitor-state-test.sh anyway).
+- **`./test/cli` metadata lint** (`test/cli:~606-612`) — `omarchy-monitor-state` keeps its `summary`/`group` headers; no args metadata changes. No edit needed, just keep it passing.
+
+### Requires a running shell (`agents/skills/visual-verification.md`)
+
+After QML edits: `omarchy-restart-shell`, then `omarchy capture screenshot fullscreen save`; `wtype -k ...` exercises keyboard paths (PanelKeyCatcher routes h/l/j/k/Return through `moveCursor`/`activateCursor`).
+
+- **SCALE-05 targeting** — open the panel on each screen (click each bar's widget, or focus a monitor then `omarchy-shell shell summon omarchy.monitor`), click a pill on screen A, verify via `hyprctl monitors -j` that the named monitor's `.scale` changed and the other did not; repeat on screen B. Confirm `monitors.lua` gains a rule keyed to the right output with live position preserved (`-1200x0` for HDMI-A-1 — Phase 1 contract exercised end-to-end).
+- **D-03 header** — screenshot both bars: `SCALE — eDP-1 · 1.5x` on internal, `SCALE — HDMI-A-1 · 1.6x` on external.
+- **D-04 dynamic pill** — eDP-1 at non-preset 1.5 shows 7 pills with `1.5x` active; after clicking a preset the dynamic pill disappears (7→6 reflow). Screenshot before/after.
+- **SCALE-06** — DISPLAYS rows render `eDP-1 · 1.5x` / `HDMI-A-1 · 1.6x · focused` suffixes.
+- **SCALE-07 single-monitor collapse** — can't unplug the user's HDMI; simulate with `hyprctl keyword monitor HDMI-A-1,disable` (the exact command `toggleDisplay` issues at `Panel.qml:303`), reopen the panel: DISPLAYS section + separator hidden, pills still work; re-enable after. The disabled-row JSON shape is already proven by the clamshell fixture (`monitor-state-test.sh:77-80`).
+- **`runtime-smoke-test.sh:543-565`** — compositor-gated (`require_compositor`, `base-test.sh:64-77`); opens/closes `omarchy.monitor` via IPC under a test shell and counts per-screen IPC-handler collisions — catches load-time QML errors and duplicate instance registration. Runs in-session when a compositor is reachable.
+
+### Not testable in-session
+
+- **`test/acceptance.d/panels-test.sh:66-69`** — monitor panel summon + screenshot runs only in the disposable omarchy-iso VM (`TESTING.md:110-135`), and that VM is single-monitor, so it only exercises the SCALE-07 path.
+- **Mirror-output targeting** — the CLI resolves names against `hyprctl monitors -j` (non-`all`), which drops mirror outputs (`monitor-modeless-test.sh:132`), so a pill click on a mirrored screen's bar exits 1 silently (`actionProc` just refreshes, `Panel.qml:435`). Reproducing requires actually mirroring the user's displays — destructive mid-session; document as known limitation unless the planner adds mirror detection.
+- **`QsWindow` attach timing** — `Component.onCompleted: refresh()` can fire before the attached window resolves; timing-dependent and not deterministically reproducible headlessly. Mitigated by keeping `ownScreenName` a binding with focused fallback — verified by reasoning plus live smoke, not a unit test.
+- **Persistence across reload/reboot** — inherited from Phase 1 (monitors.lua rewrite + backups, verified in `01-VERIFICATION.md`); a live `omarchy-restart-shell` spot check suffices — no new harness needed.
+
+### Nyquist sampling recommendation
+
+- **Per-change (sample on every commit touching phase files):** `monitor-test.sh` (Model helpers + QML textual assertions), `monitor-state-test.sh` (line-7 JSON shape), `qml-text-format-test.sh` + `panel-command-path-test.sh` (tree guards), `bash -n` on the edited script, `./test/cli` (metadata lint).
+- **Integration (sample when plumbing or the apply path changes):** `monitor-scaling-test.sh` — Phase 1 targeted-monitor cases (`:480-500`: `run_scaling 2.5 HDMI-A-1`, `up HDMI-A-1`, unknown/unsafe names, >2 args) are the CLI side of the round-trip the panel now depends on; plus `monitor-state-test.sh` and a manual `omarchy-monitor-state | tail -1 | jq` smoke.
+- **Full-system (phase-complete / pre-ship):** live UAT on the user's real 2-monitor setup (eDP-1@1.5 non-preset + HDMI-A-1@1.6 at `-1200x0` — the `02-CONTEXT.md:87` fixture): restart shell, screenshot both bars' headers/pill rows/DISPLAYS suffixes, `wtype` keyboard nav, disabled-monitor collapse simulation, restart-persistence spot check. VM acceptance run via omarchy-iso is optional and only covers single-monitor.
+
+### Test file mapping
+
+| File | Change |
+|---|---|
+| `test/shell.d/monitor-test.sh` | Extend the existing `run_node_test` heredoc: `scalesWithCurrent` cases, own-display lookup helper, `parseDisplays` fixtures gain `scale` (`:60-77`). Append `fs.readFileSync` textual assertions for Panel.qml in the same block (precedent: `app-search-test.sh` mixes JS unit tests + QML regexes in one heredoc) — or split them into a small new `monitor-panel-test.sh`; either is picked up by `./test/shell` automatically. |
+| `test/shell.d/monitor-state-test.sh` | Fixtures (`:59-80`) gain `"scale":N`; expected line-7 JSON (`:112-116`) gains `,"scale":N` byte-for-byte. Same commit as the `bin/omarchy-monitor-state:22-23` jq edit. |
+| `test/shell.d/monitor-scaling-test.sh` | No edits — run as the integration check for the `[scale] [monitor]` round-trip. |
+| `test/shell.d/qml-text-format-test.sh`, `panel-command-path-test.sh` | No edits — tree-wide guards that fail automatically if new `Text` bindings drop `textFormat` or the panel resolves helpers through bar paths. |
+| `test/shell.d/runtime-smoke-test.sh` | No edits — compositor-gated coverage (IPC open/close, per-screen handler collision count) applies automatically. |
+| `test/acceptance.d/panels-test.sh` | No edits — VM-only; monitor panel already in the summon/screenshot list (`:66`). |
+| `./test/cli` | No edits — metadata lint keeps passing as long as `omarchy-monitor-state`'s headers stay intact. |
+
 ## Open questions
 
 - **Plumbing confirmation:** extend `omarchy-monitor-state`'s JSON (recommended) vs. a second `hyprctl monitors all -j` Process in the panel — REQUIREMENTS.md:40/STATE.md:72 lean the latter, 02-CONTEXT leans the former.
