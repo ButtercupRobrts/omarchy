@@ -39,8 +39,8 @@ created: "2026-09-15"
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 04-01-01 | 01 | 1 | MENU-01 | — | N/A | unit | `./test/shell` (menu-test.sh node tests) | ✅ | ⬜ pending |
-| 04-01-02 | 01 | 1 | MENU-01 | — | N/A | e2e (stub omarchy-shell) | `./test/shell` (menu-select-test.sh) | ❌ W0 | ⬜ pending |
+| 04-01-01 | 01 | 1 | MENU-01 | — | N/A | tracer e2e (stub omarchy-shell) | `./test/shell` (menu-select-test.sh) | ❌ W0 | ⬜ pending |
+| 04-01-02 | 01 | 1 | MENU-01 | — | N/A | unit + source pins | `./test/shell` (menu-test.sh node tests, menu-select-test.sh) | ✅/❌ W0 | ⬜ pending |
 | 04-01-03 | 01 | 1 | MENU-01 | — | N/A | manual (running UI) | `omarchy-menu-select "Pick" a b c -- --default-index 1` + `wtype -k Return` | — | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
