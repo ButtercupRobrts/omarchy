@@ -3,9 +3,9 @@ phase: "05"
 slug: "non-interactive-quality-in-omarchy-transcode"
 # status lifecycle: draft (seeded by plan-phase) → validated (set by validate-phase §6)
 # audit-milestone §5.5 distinguishes NOT-VALIDATED (draft) from PARTIAL (validated + nyquist_compliant: false) (#2117)
-status: draft
-nyquist_compliant: false
-wave_0_complete: false
+status: validated
+nyquist_compliant: true
+wave_0_complete: true
 created: "2026-09-15"
 ---
 
@@ -40,9 +40,9 @@ created: "2026-09-15"
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 05-01-01 | 01 | 1 | QUAL-02, QUAL-03, SAFE-01 | T-05-01 | Quality arg validated before any notification; dedupe resolves path before "Transcoding…"; `[[ -e \|\| -L ]]` blocks symlink write-through | e2e (stub) | `bash test/shell.d/transcode-quality-test.sh` | ❌ W0 | ⬜ pending |
-| 05-01-02 | 01 | 1 | QUAL-02, QUAL-03, SAFE-01 | — | Full assertion matrix green incl. byte-identical medium, dedupe chains, picture rejection pre-notification | e2e (stub) | `bash test/shell.d/transcode-quality-test.sh` | ✅ | ⬜ pending |
-| 05-01-03 | 01 | 1 | QUAL-02 | — | usage()/metadata reflect `[quality]`; `./test/cli` metadata lint stays green | lint+docs | `./test/cli && bash -n bin/omarchy-transcode` | ✅ | ⬜ pending |
+| 05-01-01 | 01 | 1 | QUAL-02, QUAL-03, SAFE-01 | T-05-01 | Quality arg validated before any notification; dedupe resolves path before "Transcoding…"; `[[ -e \|\| -L ]]` blocks symlink write-through | e2e (stub) | `bash test/shell.d/transcode-quality-test.sh` | ✅ | ✅ green |
+| 05-01-02 | 01 | 1 | QUAL-02, QUAL-03, SAFE-01 | — | Full assertion matrix green incl. byte-identical medium, dedupe chains, picture rejection pre-notification | e2e (stub) | `bash test/shell.d/transcode-quality-test.sh` | ✅ | ✅ green (29/29) |
+| 05-01-03 | 01 | 1 | QUAL-02 | — | usage()/metadata reflect `[quality]`; `./test/cli` metadata lint stays green | lint+docs | `./test/cli && bash -n bin/omarchy-transcode` | ✅ | ✅ green |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -72,6 +72,6 @@ created: "2026-09-15"
 - [x] Wave 0 covers all MISSING references (the test file itself)
 - [x] No watch-mode flags
 - [x] Feedback latency < 15s
-- [ ] `nyquist_compliant: true` set in frontmatter (set by validate-phase audit)
+- [x] `nyquist_compliant: true` set in frontmatter (set by validate-phase audit)
 
-**Approval:** pending
+**Approval:** approved 2026-09-15 — gap analysis found 0 gaps; all tasks have green automated verify, manual items registered
