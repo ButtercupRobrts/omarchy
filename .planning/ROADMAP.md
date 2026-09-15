@@ -13,7 +13,7 @@ Milestone v1.1 adds a quality step and size feedback to `omarchy-transcode` in f
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 4: Menu `defaultIndex` plumbing** - `omarchy-menu-select` accepts `--default-index N` (post-`--` menu arg) → `defaultIndex` in the JSON payload → `Menu.qml` `openDmenu` pre-highlights that row
+- [x] **Phase 4: Menu `defaultIndex` plumbing** - `omarchy-menu-select` accepts `--default-index N` (post-`--` menu arg) → `defaultIndex` in the JSON payload → `Menu.qml` `openDmenu` pre-highlights that row
 - [ ] **Phase 5: Non-interactive quality in `omarchy-transcode`** - Optional 4th positional arg with validation, locked CRF/fps tier tables, non-default quality filename suffix, deliberate output-collision policy
 - [ ] **Phase 6: Interactive quality prompt + size estimates** - Quality menu step after format+resolution for video, `~N MB` subtexts for mp4, fps subtexts for gif, `medium` pre-highlighted via Phase 4 plumbing
 - [ ] **Phase 7: Completion-size notification + docs** - Actual output size appended to the done notification; usage/metadata/manual sync
@@ -106,7 +106,7 @@ Phases execute in numeric order: 4 → 5 → 6 → 7 (4 and 5 are independent; 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 4. Menu `defaultIndex` plumbing | 1/1 | In Progress|  |
+| 4. Menu `defaultIndex` plumbing | 1/1 | Complete | 2026-09-15 |
 | 5. Non-interactive quality in `omarchy-transcode` | 0/0 | Pending |  |
 | 6. Interactive quality prompt + size estimates | 0/0 | Pending |  |
 | 7. Completion-size notification + docs | 0/0 | Pending |  |

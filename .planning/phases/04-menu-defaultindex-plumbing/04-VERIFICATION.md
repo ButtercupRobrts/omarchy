@@ -1,7 +1,7 @@
 ---
 phase: 04-menu-defaultindex-plumbing
 verified: 2026-09-15T11:30:21Z
-status: human_needed
+status: passed
 score: 7/7 must-haves verified
 covered_files:
   - .planning/REQUIREMENTS.md
@@ -35,7 +35,7 @@ human_verification:
 
 **Phase Goal:** `omarchy-menu-select` accepts `--default-index N` after `--`, emits `defaultIndex` in the select-mode JSON payload, and `Menu.qml`'s `openDmenu` initializes `selectedIndex` from it — with every existing caller byte-identical in behavior
 **Verified:** 2026-09-15T11:30:21Z
-**Status:** human_needed
+**Status:** passed — human verification completed 2026-09-15 via `04-UAT.md` (4/4 running-UI items passed against the dev-linked shell)
 **Re-verification:** No — initial verification
 
 ## Goal Achievement

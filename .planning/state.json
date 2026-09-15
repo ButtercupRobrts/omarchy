@@ -1,0 +1,33 @@
+{
+  "contract": "1.0.0",
+  "flavor": "core",
+  "milestone": "v1.1",
+  "phases": [
+    {
+      "number": "4",
+      "name": "Menu `defaultIndex` plumbing",
+      "status": "complete"
+    },
+    {
+      "number": "5",
+      "name": "Non-interactive quality in `omarchy-transcode`",
+      "status": "pending"
+    },
+    {
+      "number": "6",
+      "name": "Interactive quality prompt + size estimates",
+      "status": "pending"
+    },
+    {
+      "number": "7",
+      "name": "Completion-size notification + docs",
+      "status": "pending"
+    }
+  ],
+  "next": {
+    "command": "/gsd-discuss-phase 5",
+    "label": "Discuss Phase 5 (non-interactive quality)",
+    "reason": "Phase 04 of 7 complete — UAT 4/4 passed; Phase 5 unblocked"
+  },
+  "updated_at": "2026-09-15T12:05:00.000Z"
+}
