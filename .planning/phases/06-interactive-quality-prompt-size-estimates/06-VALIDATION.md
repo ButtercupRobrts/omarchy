@@ -40,11 +40,14 @@ created: "2026-09-15"
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 06-01-TBD | 01 | 1 | QUAL-01 | T-06-01 | ffprobe output regex-validated before awk/`(( ))`; menu pick re-validated `high\|medium\|low` after tab-strip | e2e (stub) | `bash test/shell.d/transcode-quality-test.sh` | ✅ | ⬜ pending |
-| 06-01-TBD | 01 | 1 | SIZE-01 | T-06-01 | `~N MB` at 1–2 sig figs; `larger than source` degrade; N/A→all-qualitative fallback; no probe on positional path | e2e (stub) | `bash test/shell.d/transcode-quality-test.sh` | ✅ | ⬜ pending |
+| 06-01-01 | 01 | 1 | QUAL-01 | T-06-02, T-06-03 | menu pick stripped at first tab + re-validated `high\|medium\|low` inside `select_quality` before the notification boundary; Esc propagates exit 1 silently | e2e (stub) | `bash test/shell.d/transcode-quality-test.sh` | ✅ | ⬜ pending |
+| 06-01-01 | 01 | 1 | SIZE-01 | T-06-01 | ffprobe output regex-gated `^[0-9.]+$`/`^[0-9]+$` before `awk -v`; `~N MB` at 1–2 sig figs; no probe on the 4-positional path | e2e (stub) | `bash test/shell.d/transcode-quality-test.sh` | ✅ | ⬜ pending |
+| 06-01-02 | 01 | 1 | QUAL-01 | T-06-02 | foreign-label pick rejected pre-notification; gif fps subtexts with zero-ffprobe pin; picture path never prompts | e2e (stub) | `bash test/shell.d/transcode-quality-test.sh` | ✅ | ⬜ pending |
+| 06-01-02 | 01 | 1 | SIZE-01 | T-06-01, T-06-03 | per-row `larger than source` degrade; `N/A` + hard-fail → all-qualitative fallback (no abort); `FAKE_AUDIO=no` drops the 192k term | e2e (stub) | `bash test/shell.d/transcode-quality-test.sh` | ✅ | ⬜ pending |
+| 06-01-03 | 01 | 1 | QUAL-01, SIZE-01 | — | usage() names the quality step; suite sweep green modulo the 7 known environmental failures | suite | `./test/shell` + `./test/cli` | ✅ | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
-*Planner replaces TBD rows with real task IDs; harness upgrade (dual-mode menu-select stub, arg-dispatched ffprobe stub, `truncate -s` fixtures) lands with the first task.*
+*Harness upgrade (dual-mode menu-select stub, arg-dispatched ffprobe stub, `truncate -s` fixtures) lands with task 06-01-01.*
 
 ---
 
