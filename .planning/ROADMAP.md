@@ -82,10 +82,11 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 **Canonical refs:** `.planning/research/ARCHITECTURE.md` (integration points, tab contract), `.planning/research/FEATURES.md` (estimate placement), `.planning/research/PITFALLS.md` (pitfalls 1, 8, 10)
 
-**Plans**: 1 plan
+**Plans**: 1/1 plans executed
 
 Plans:
-- [ ] 06-01-PLAN.md — six helpers (`select_quality` + probe/token/kbps/estimate) + `type == video && -z $quality` main() block, dual-mode/ffprobe stub harness + degrade matrix, usage touch + atomic commit
+
+- [x] 06-01-PLAN.md — six helpers (`select_quality` + probe/token/kbps/estimate) + `type == video && -z $quality` main() block, dual-mode/ffprobe stub harness + degrade matrix, usage touch + atomic commit
 
 ### Phase 7: Completion-size notification + docs
 
@@ -113,5 +114,5 @@ Phases execute in numeric order: 4 → 5 → 6 → 7 (4 and 5 are independent; 6
 |-------|----------------|--------|-----------|
 | 4. Menu `defaultIndex` plumbing | 1/1 | Complete | 2026-09-15 |
 | 5. Non-interactive quality in `omarchy-transcode` | 1/1 | Complete | 2026-09-15 |
-| 6. Interactive quality prompt + size estimates | 0/0 | Pending |  |
+| 6. Interactive quality prompt + size estimates | 1/1 | In Progress|  |
 | 7. Completion-size notification + docs | 0/0 | Pending |  |

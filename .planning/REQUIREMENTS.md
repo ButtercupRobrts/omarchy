@@ -9,13 +9,13 @@ Requirements for this milestone. Each maps to roadmap phases.
 
 ### Quality Selection
 
-- [ ] **QUAL-01**: The video transcode flow offers a quality step (high/medium/low) after format and resolution; mp4 maps to CRF tiers (x264 18/23/28, x265 20/24/28), gif maps to fps tiers (15/10/5)
+- [x] **QUAL-01**: The video transcode flow offers a quality step (high/medium/low) after format and resolution; mp4 maps to CRF tiers (x264 18/23/28, x265 20/24/28), gif maps to fps tiers (15/10/5)
 - [x] **QUAL-02**: Quality is an optional 4th positional arg (`omarchy transcode in.mov mp4 1080p medium`); `medium` or omitted reproduces current encoder flags exactly — backward compatible for the Nautilus extension and scripts
 - [x] **QUAL-03**: Pictures never see the quality step; the 4th positional arg is rejected for image inputs (`high/medium/low` in slot 3 remains picture resolution)
 
 ### Size Feedback
 
-- [ ] **SIZE-01**: mp4 quality menu rows show a `~N MB` estimate as subtext (ffprobe duration × per-resolution/tier bitrate table + fixed 192k audio); gif rows show fps instead of a size estimate
+- [x] **SIZE-01**: mp4 quality menu rows show a `~N MB` estimate as subtext (ffprobe duration × per-resolution/tier bitrate table + fixed 192k audio); gif rows show fps instead of a size estimate
 - [ ] **SIZE-02**: The completion notification reports the actual output file size
 
 ### Menu Infrastructure
@@ -57,8 +57,8 @@ Deferred to a future milestone. Tracked but not in the current roadmap.
 | QUAL-02 | Phase 5 | Complete |
 | QUAL-03 | Phase 5 | Complete |
 | SAFE-01 | Phase 5 | Complete |
-| QUAL-01 | Phase 6 | Pending |
-| SIZE-01 | Phase 6 | Pending |
+| QUAL-01 | Phase 6 | Complete |
+| SIZE-01 | Phase 6 | Complete |
 | SIZE-02 | Phase 7 | Pending |
 
 **Coverage:**
