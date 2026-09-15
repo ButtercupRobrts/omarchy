@@ -10,8 +10,8 @@ Requirements for this milestone. Each maps to roadmap phases.
 ### Quality Selection
 
 - [ ] **QUAL-01**: The video transcode flow offers a quality step (high/medium/low) after format and resolution; mp4 maps to CRF tiers (x264 18/23/28, x265 20/24/28), gif maps to fps tiers (15/10/5)
-- [ ] **QUAL-02**: Quality is an optional 4th positional arg (`omarchy transcode in.mov mp4 1080p medium`); `medium` or omitted reproduces current encoder flags exactly — backward compatible for the Nautilus extension and scripts
-- [ ] **QUAL-03**: Pictures never see the quality step; the 4th positional arg is rejected for image inputs (`high/medium/low` in slot 3 remains picture resolution)
+- [x] **QUAL-02**: Quality is an optional 4th positional arg (`omarchy transcode in.mov mp4 1080p medium`); `medium` or omitted reproduces current encoder flags exactly — backward compatible for the Nautilus extension and scripts
+- [x] **QUAL-03**: Pictures never see the quality step; the 4th positional arg is rejected for image inputs (`high/medium/low` in slot 3 remains picture resolution)
 
 ### Size Feedback
 
@@ -24,7 +24,7 @@ Requirements for this milestone. Each maps to roadmap phases.
 
 ### Output Safety
 
-- [ ] **SAFE-01**: Output filename gains a quality suffix only for non-default quality (`stem-1080p-low.mp4`, `stem-1080p.mp4` stays for medium); overwrite behavior is deliberate and safe on non-interactive launch paths (no ffmpeg stdin-prompt hangs or silent aborts)
+- [x] **SAFE-01**: Output filename gains a quality suffix only for non-default quality (`stem-1080p-low.mp4`, `stem-1080p.mp4` stays for medium); overwrite behavior is deliberate and safe on non-interactive launch paths (no ffmpeg stdin-prompt hangs or silent aborts)
 
 ## v2 Requirements
 
@@ -54,9 +54,9 @@ Deferred to a future milestone. Tracked but not in the current roadmap.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | MENU-01 | Phase 4 | Complete |
-| QUAL-02 | Phase 5 | Pending |
-| QUAL-03 | Phase 5 | Pending |
-| SAFE-01 | Phase 5 | Pending |
+| QUAL-02 | Phase 5 | Complete |
+| QUAL-03 | Phase 5 | Complete |
+| SAFE-01 | Phase 5 | Complete |
 | QUAL-01 | Phase 6 | Pending |
 | SIZE-01 | Phase 6 | Pending |
 | SIZE-02 | Phase 7 | Pending |

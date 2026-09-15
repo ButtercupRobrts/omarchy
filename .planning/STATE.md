@@ -4,16 +4,16 @@ milestone: v1.1
 current_phase: 04
 current_phase_name: Menu defaultIndex plumbing
 status: verifying
-stopped_at: Phase 5 planned
-last_updated: "2026-09-15T14:33:15.418Z"
+stopped_at: Completed 05-01-PLAN.md
+last_updated: "2026-09-15T14:57:41.109Z"
 last_activity: 2026-09-15
 last_activity_desc: Phase 04 execution started
-state_head: 1c080bc50c2bdedc09adba24be99da2bb5f51e7a
+state_head: 59e97b0197fc6ce74d7e46f66a0246ab5399c3dd
 progress:
   total_phases: 4
   completed_phases: 1
   total_plans: 2
-  completed_plans: 1
+  completed_plans: 2
 milestone_name: Transcode Quality & Size Feedback
 ---
 
@@ -61,6 +61,7 @@ Last activity: 2026-09-15 — Phase 04 execution started
 | Phase 1 P01 | 23 min | 4 tasks | 2 files |
 | Phase 2 P01 | 24 min | 4 tasks | 5 files |
 | Phase 04 P01 | 51min | 3 tasks | 6 files |
+| Phase 05-non-interactive-quality-in-omarchy-transcode P01 | 14min | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -77,6 +78,7 @@ Recent decisions affecting current work:
 - [Phase 2]: Own-screen identity via bound QsWindow attached property (ownWindow/ownScreenName) with parallel ownDisplay()/ownScale — focusedMonitor/monitorScale keep focused semantics for brightness argv and stateIpc, never repurposed
 - [Phase 2]: setScale uses direct argv (no bash -c), appending ownScreenName only when non-empty; SCALE header reads `ownScreenName · ownScalex` ungated by display count (D-03); DISPLAYS rows append `· N.Nx` gated on enabled + non-empty normalization (D-01); non-preset current scale surfaces via Model.scalesWithCurrent sorted-insert pill (D-04)
 - [Phase 04]: Phase 4: --default-index N is a post--- menu arg emitting an optional defaultIndex payload field; MenuModel.dmenuDefaultIndex resolves it into [0,count-1]; openDmenu assigns selectedIndex from it before rebuildDisplay() so the existing clamp bounds out-of-range; initial-only semantics — setFilter keeps resetting to row 0 (D-05); single atomic commit for the whole flag→payload→cursor path
+- [Phase 04]: [Phase 5]: omarchy-transcode gains optional 4th-positional [quality] (high|medium|low whitelist) mapping to locked CRF/fps tiers via case in transcode_video; medium/omitted byte-identical; -high/-low filename suffix + [[ -e || -L ]] dedupe to -2/-3 inside output_path resolved pre-notification (dedupe applies to pictures too — uniform policy); empty quality stays empty in main() so Phase 6's -z prompt trigger survives
 
 ### Roadmap Evolution
 
@@ -104,6 +106,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-15T14:33:15.394Z
-Stopped at: Phase 5 planned
-Resume file: .planning/phases/05-non-interactive-quality-in-omarchy-transcode/05-01-PLAN.md
+Last session: 2026-09-15T14:57:41.080Z
+Stopped at: Completed 05-01-PLAN.md
+Resume file: None

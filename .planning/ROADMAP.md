@@ -59,9 +59,9 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 **Canonical refs:** `.planning/research/STACK.md` (tier tables), `.planning/research/PITFALLS.md` (pitfalls 3–7), `bin/omarchy-transcode`
 
-**Plans**: 1 plan
+**Plans**: 1/1 plans executed
 
-- [ ] 05-01-PLAN.md — 4th-positional `[QUALITY]` → main() whitelist validation → `output_path` suffix + `[[ -e || -L ]]` dedupe → `transcode_video` tier case, with stub-bin e2e matrix, docs sync, one atomic commit
+- [x] 05-01-PLAN.md — 4th-positional `[QUALITY]` → main() whitelist validation → `output_path` suffix + `[[ -e || -L ]]` dedupe → `transcode_video` tier case, with stub-bin e2e matrix, docs sync, one atomic commit
 
 ### Phase 6: Interactive quality prompt + size estimates
 
@@ -109,6 +109,6 @@ Phases execute in numeric order: 4 → 5 → 6 → 7 (4 and 5 are independent; 6
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 4. Menu `defaultIndex` plumbing | 1/1 | Complete | 2026-09-15 |
-| 5. Non-interactive quality in `omarchy-transcode` | 0/0 | Pending |  |
+| 5. Non-interactive quality in `omarchy-transcode` | 1/1 | In Progress|  |
 | 6. Interactive quality prompt + size estimates | 0/0 | Pending |  |
 | 7. Completion-size notification + docs | 0/0 | Pending |  |
