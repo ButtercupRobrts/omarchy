@@ -250,7 +250,7 @@ Phase 6's dual-mode variant (RESEARCH §5a) merges this with the existing tripwi
 
 #### Analog: arg-dispatched probe stub
 
-New — no existing arg-dispatch stub is this close, but the shape is the `file` stub's `case "${!#}"` extension dispatch (`:19-23`) applied to `case " $* "` content matching (RESEARCH §5b): `*" codec_type "*` ⇒ audio probe (emit `audio` when `FAKE_AUDIO=yes`); otherwise duration probe (emit `$FAKE_DURATION`, honor `FAKE_PROBE_RC`). Both still append `ffprobe: $*` to `$CALLS` — the zero-`ffprobe:`-lines assertions (gif path, non-interactive path) depend on that record line.
+New — no existing arg-dispatch stub is this close, but the shape is the `file` stub's `case "${!#}"` extension dispatch (`:19-23`) applied to `case " $* "` content matching (RESEARCH §5b): `*" stream=codec_type "*` ⇒ audio probe (emit `audio` when `FAKE_AUDIO=yes`); otherwise duration probe (emit `$FAKE_DURATION`, honor `FAKE_PROBE_RC`). The token must include `stream=` — the real argv carries `-show_entries stream=codec_type` glued to `=`, so a bare ` codec_type ` glob never matches (verified live; corrected in RESEARCH §5b and 06-01-PLAN action 9). Both still append `ffprobe: $*` to `$CALLS` — the zero-`ffprobe:`-lines assertions (gif path, non-interactive path) depend on that record line.
 
 #### Analog: sized sparse fixture (`test/shell.d/plymouth-set-test.sh:834-839`)
 
@@ -263,7 +263,7 @@ New — no existing arg-dispatch stub is this close, but the shape is the `file`
 839|truncate -s "$((64 * 1024 * 1024 + 1))" "$test_tmp/logo.png"
 ```
 
-The one `truncate -s` precedent in the suite. Load-bearing here: `touch`ed fixtures are 0 bytes ⇒ `stat -c %s` = 0 ⇒ EVERY estimate exceeds the source ⇒ every row degrades to `larger than source` (RESEARCH §5c). Estimate rows need `truncate -s 40M "$TMPDIR/in.mov"` (or a separate sized fixture); the D-02 per-row-degrade pin needs a fixture sized BETWEEN tier estimates.
+The one `truncate -s` precedent in the suite. Load-bearing here: `touch`ed fixtures are 0 bytes ⇒ `stat -c %s` = 0 ⇒ EVERY estimate exceeds the source ⇒ every row degrades to `larger than source` (RESEARCH §5c). Estimate rows need `truncate -s 120M "$TMPDIR/in.mov"` — corrected from an earlier 40M: 40 MiB is below the dur=60/1080p-high estimate (~42.7 MB) so the D-02 gate would mask every pinned `~N MB` (06-01-PLAN action 10 is authoritative); the D-02 per-row-degrade pin needs a fixture sized BETWEEN tier estimates (the plan's `truncate -s 15M small.mov` row).
 
 #### Assertion idioms (already in the file — reuse, don't invent)
 

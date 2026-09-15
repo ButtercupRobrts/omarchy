@@ -255,7 +255,7 @@ Insert between the resolution block (ends :234) and `output=$(output_path ...)` 
 
 ## 2. The estimate arithmetic — why awk renders, not numfmt
 
-- Locked formula: `est_MB = dur_s × (video_kbps + 192) / 8192` [VERIFIED: .planning/research/STACK.md:44 — "est_MB = dur_s × (video_kbps + 192) / 8192 via awk"]. Equivalent byte form used above: `bytes = dur × (kbps + audio_kbps) × 125`, `mb = bytes / 1048576` — same scale (MiB), and it keeps the estimate on the same unit `numfmt --to=iec` will report the actual size in Phase 7.
+- Locked formula: `est_MB = dur_s × (video_kbps + 192) / 8192` [VERIFIED: .planning/research/STACK.md:44 — "est_MB = dur_s × (video_kbps + 192) / 8192 via awk"]. Near-equivalent byte form used above — AUTHORITATIVE for the plan's pinned values: `bytes = dur × (kbps + audio_kbps) × 125`, `mb = bytes / 1048576` — same scale (MiB), and it keeps the estimate on the same unit `numfmt --to=iec` will report the actual size in Phase 7. The two forms differ ~2.4% (`/8192` counts 1024 B/s per kbps; `×125` counts 1000/8) — e.g. dur=60/1080p-high renders `~42 MB` under the STACK form vs `~41 MB` under the byte form — so §5d's expected strings are only valid against the byte form.
 - **1–2 sig figs** (D-00h): `d = int(log(mb)/log(10)) - 1; r = int(mb/(10^d) + 0.5) * (10^d)` → 23.4 → `~23 MB`, 113.7 → `~110 MB`, 1187 → `~1200 MB`, 0.5 → floored `~1 MB`. Never a decimal point.
 - **D-02 comparison in the same awk call:** `src` is the raw `stat -c %s` byte count; `bytes > src` → `larger than source` instead of the number. Subtext then reads `CRF 18 · larger than source` (26 chars — within the ≤~30 budget, and only *the number* is replaced per D-02, so the CRF anchor stays).
 - **`stat` failure → `src=""` → comparison disabled** → numeric estimate shows anyway (degrading to qualitative on a stat hiccup would punish a path that was already `[[ -f ]]`-verified).
@@ -310,17 +310,17 @@ cat >"$STUB_DIR/ffprobe" <<'SH'
 #!/bin/bash
 printf 'ffprobe: %s\n' "$*" >>"$CALLS"
 case " $* " in
-*" codec_type "*) [[ ${FAKE_AUDIO:-yes} == "yes" ]] && echo audio ;;
+*" stream=codec_type "*) [[ ${FAKE_AUDIO:-yes} == "yes" ]] && echo audio ;;
 *) [[ -n ${FAKE_DURATION+x} ]] && { printf '%s\n' "$FAKE_DURATION"; exit "${FAKE_PROBE_RC:-0}"; } ;;
 esac
 SH
 ```
 
-`codec_type` in argv ⇒ the audio probe (emit `audio` or nothing); otherwise the duration probe (emit `$FAKE_DURATION`, or honor `FAKE_PROBE_RC=1` for the hard-failure row).
+` stream=codec_type ` in argv ⇒ the audio probe (emit `audio` or nothing); otherwise the duration probe (emit `$FAKE_DURATION`, or honor `FAKE_PROBE_RC=1` for the hard-failure row). NOTE: the dispatch token must be ` stream=codec_type ` — the real argv glues `codec_type` to `=` inside `-show_entries stream=codec_type`, so a bare ` codec_type ` glob never matches and the audio probe would fall into the duration arm (verified live; 06-01-PLAN action 9 carries the corrected pattern).
 
 ### 5c. Fixture detail that will bite: `stat` on the input
 
-`touch`-created fixtures are 0 bytes → **every** estimate exceeds the source → every row degrades to `larger than source`. Interactive estimate rows need a sized fixture: `truncate -s 40M "$TMPDIR/in.mov"` (sparse, instant, `stat` reports the size) — or keep a separate sized fixture for estimate rows.
+`touch`-created fixtures are 0 bytes → **every** estimate exceeds the source → every row degrades to `larger than source`. Interactive estimate rows need a sized fixture: `truncate -s 120M "$TMPDIR/in.mov"` (sparse, instant, `stat` reports the size). CORRECTED: an earlier draft said 40M — but 40 MiB < the dur=60/1080p-high estimate (60×5692×125 = 42.7 MB) and far below dur=157's (~111.7 MB), so the D-02 gate would mask every pinned `~N MB`; 120 MiB exceeds the largest pinned estimate (06-01-PLAN action 10 is authoritative).
 
 ### 5d. Assertion matrix (maps to the six ROADMAP criteria)
 
