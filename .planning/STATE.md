@@ -1,18 +1,19 @@
 ---
 gsd_state_version: "1.0"
 milestone: v1.1
-current_phase_name: defining requirements
-status: planning
-stopped_at: Phase 4 planned — 1 plan, 3 tasks, checker passed (3 info advisories addressed)
-last_updated: "2026-09-15T00:03:31.575Z"
+current_phase: 04
+current_phase_name: Menu defaultIndex plumbing
+status: verifying
+stopped_at: Completed 04-01-PLAN.md
+last_updated: "2026-09-15T09:34:10.582Z"
 last_activity: 2026-09-15
-last_activity_desc: Milestone v1.1 started
-state_head: 25c92c76b355407ffeeb020dce2848074284180e
+last_activity_desc: Phase 04 execution started
+state_head: 46956936d6974fc1898ecc140d660a2829108d9c
 progress:
   total_phases: 4
   completed_phases: 0
   total_plans: 1
-  completed_plans: 0
+  completed_plans: 1
 milestone_name: Transcode Quality & Size Feedback
 ---
 
@@ -23,14 +24,14 @@ milestone_name: Transcode Quality & Size Feedback
 See: .planning/PROJECT.md (updated 2026-09-14)
 
 **Core value:** A monitor scale change made from the bar or CLI must apply to the intended monitor and still be in effect after reboot.
-**Current focus:** Phase 3 — Scale-aware monitor position adjustment
+**Current focus:** Phase 04 — Menu defaultIndex plumbing
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-09-15 — Milestone v1.1 started
+Phase: 04 (Menu defaultIndex plumbing) — EXECUTING
+Plan: 1 of 1
+Status: Phase complete — ready for verification
+Last activity: 2026-09-15 — Phase 04 execution started
 
 ## Performance Metrics
 
@@ -59,6 +60,7 @@ Last activity: 2026-09-15 — Milestone v1.1 started
 |------|----------|-------|-------|
 | Phase 1 P01 | 23 min | 4 tasks | 2 files |
 | Phase 2 P01 | 24 min | 4 tasks | 5 files |
+| Phase 04 P01 | 51min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -74,6 +76,7 @@ Recent decisions affecting current work:
 - [Phase 2]: Per-display scale via omarchy-monitor-state displays JSON 'scale' field (additive, positional contract untouched) — supersedes init decision for a separate hyprctl Process
 - [Phase 2]: Own-screen identity via bound QsWindow attached property (ownWindow/ownScreenName) with parallel ownDisplay()/ownScale — focusedMonitor/monitorScale keep focused semantics for brightness argv and stateIpc, never repurposed
 - [Phase 2]: setScale uses direct argv (no bash -c), appending ownScreenName only when non-empty; SCALE header reads `ownScreenName · ownScalex` ungated by display count (D-03); DISPLAYS rows append `· N.Nx` gated on enabled + non-empty normalization (D-01); non-preset current scale surfaces via Model.scalesWithCurrent sorted-insert pill (D-04)
+- [Phase 04]: Phase 4: --default-index N is a post--- menu arg emitting an optional defaultIndex payload field; MenuModel.dmenuDefaultIndex resolves it into [0,count-1]; openDmenu assigns selectedIndex from it before rebuildDisplay() so the existing clamp bounds out-of-range; initial-only semantics — setFilter keeps resetting to row 0 (D-05); single atomic commit for the whole flag→payload→cursor path
 
 ### Roadmap Evolution
 
@@ -101,6 +104,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-15T00:03:31.548Z
-Stopped at: Phase 4 planned — 1 plan, 3 tasks, checker passed (3 info advisories addressed)
-Resume file: .planning/phases/04-menu-defaultindex-plumbing/04-01-PLAN.md
+Last session: 2026-09-15T09:34:10.563Z
+Stopped at: Completed 04-01-PLAN.md
+Resume file: None

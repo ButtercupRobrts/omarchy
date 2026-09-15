@@ -20,7 +20,7 @@ Requirements for this milestone. Each maps to roadmap phases.
 
 ### Menu Infrastructure
 
-- [ ] **MENU-01**: `omarchy-menu-select` supports a pre-highlighted default row (`--default-index N` passed after `--`, carried through the JSON payload to `Menu.qml` `openDmenu`); all existing callers behave unchanged
+- [x] **MENU-01**: `omarchy-menu-select` supports a pre-highlighted default row (`--default-index N` passed after `--`, carried through the JSON payload to `Menu.qml` `openDmenu`); all existing callers behave unchanged
 
 ### Output Safety
 
@@ -53,7 +53,7 @@ Deferred to a future milestone. Tracked but not in the current roadmap.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| MENU-01 | Phase 4 | Pending |
+| MENU-01 | Phase 4 | Complete |
 | QUAL-02 | Phase 5 | Pending |
 | QUAL-03 | Phase 5 | Pending |
 | SAFE-01 | Phase 5 | Pending |
