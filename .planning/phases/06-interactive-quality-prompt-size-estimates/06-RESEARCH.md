@@ -378,7 +378,7 @@ The payload-level `defaultIndex:1` contract is already proven by `menu-select-te
 | A2 | `numfmt --to=iec` emits compact `108M`/`1.1G` forms (documented coreutils behavior; not executed here) | Standard Stack | None — the phase doesn't use numfmt; the claim only justifies awk rendering |
 | A3 | `stat -c %s` GNU flag is a coreutils invariant on Arch (used across the repo indirectly; not grepped in `bin/`) | §3 | Low — stat exists at `/usr/bin` and the input is already `[[ -f ]]`-verified |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **None blocking.** All discretion items carry recommendations: audio probe = yes (§3), upscale flag = defer (below), helpers below `copy_to_clipboard` (§1a), extend `transcode-quality-test.sh` (§5), awk math (§2).
 2. **Upscale flag — recommended DEFER.** Rationale: (a) flagging needs a third probe (`stream=height`) plus resolution-comparison logic — more `set -e` guard surface for a "possible v1.x refinement" the CONTEXT already files under Deferred Ideas; (b) the estimate already shows the big number honestly (PITFALLS' stated minimum); (c) `CRF 20 · ~2400 MB · upscale` strains the ~30-char budget at exactly the resolutions where the warning matters. If the planner wants it anyway, the clean seam is one more guarded probe inside `select_quality` appending ` · upscale` when `height < target` — ~10 lines.
