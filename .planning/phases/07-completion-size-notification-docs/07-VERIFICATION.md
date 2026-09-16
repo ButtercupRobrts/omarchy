@@ -15,7 +15,7 @@ covered_files:
   - test/shell.d/transcode-quality-test.sh
   - manual/12-screenshots-recording.md
 
-covered_digest: "v1:sha256:8b232ccb2700361911df21c119ab9130a5f7723e6ba9505afe81c705b7efe52e"
+covered_digest: "v1:sha256:70df99c1bfa3c84b47f7e4fe23e41544b3bb4a5cdc3036a7107a2cd39e21d477"
 behavior_unverified: 0
 overrides_applied: 0
 human_verification:
