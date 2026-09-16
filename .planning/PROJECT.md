@@ -8,9 +8,18 @@ A personal fork of Omarchy (`omacom/omarchy` → `ButtercupRobrts/omarchy`) used
 
 **v1.1 shipped 2026-09-16** — `omarchy-transcode` now offers high/medium/low quality tiers (mp4 CRF, gif fps) interactively with `~N MB` estimates and as a 4th positional arg, and the completion notification reports the actual output size. `medium` preserves prior encoder flags byte-for-byte; pictures are unchanged. Milestone audit: 7/7 requirements, `.planning/v1.1-MILESTONE-AUDIT.md`.
 
+## Current Milestone: v1.2 Target-Size Transcode
+
+**Goal:** Let the user name a target output size (`--target 25M`) and have the tool derive the best parameters that fit — bitrate from duration, resolution stepped down when the budget is too tight — instead of picking a quality tier and hoping.
+
+**Target features:**
+- `--target <size>` flag for video transcodes: two-pass encode with bitrate derived from probed duration minus audio, resolution auto-step-down on insufficient budget, honest refusal below every floor
+- A `Custom size…` row in the interactive quality menu (Menu.qml input mode) so the same capability is reachable without a terminal
+- gif refuses `--target` (palette output doesn't respond to bitrate); pictures unchanged
+
 ## Next Milestone Goals
 
-Candidates tracked in `.planning/milestones/v1.1-REQUIREMENTS.md`: `--target <size>` two-pass encode (SIZE-10), intent presets (SIZE-11), gif estimates (SIZE-12), picture quality arg (QUAL-10), Nautilus batch-answer memory (QUAL-11). Upstreaming the v1.1 change set is also open — see branch `ocr-notification-click`.
+Remaining candidates tracked in `.planning/milestones/v1.1-REQUIREMENTS.md`: intent presets (SIZE-11), gif estimates (SIZE-12), picture quality arg (QUAL-10), Nautilus batch-answer memory (QUAL-11). Upstream PR #12135 (v1.1 change set) is open — v2's upstream branch gets carved after it resolves, per the additive-layering rule.
 
 ## Requirements
 
