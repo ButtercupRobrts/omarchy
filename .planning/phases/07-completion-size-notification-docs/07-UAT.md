@@ -5,6 +5,10 @@ total: 3
 passed: 3
 issues: 0
 pending: 0
+audit_acknowledged:
+  milestone: v1.1
+  at: 2026-09-16
+  gap_snapshot: "passed::scenarios=0"
 ---
 
 # Phase 7 — User Acceptance Testing

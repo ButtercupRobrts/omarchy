@@ -21,13 +21,13 @@
     {
       "number": "7",
       "name": "Completion-size notification + docs",
-      "status": "pending"
+      "status": "complete"
     }
   ],
   "next": {
-    "command": "/gsd-progress --next",
-    "label": "Advance to the next step",
-    "reason": "Phase 7 of 4 · executing"
+    "command": "/gsd-new-milestone",
+    "label": "Start a new milestone",
+    "reason": "All phases complete — start a new milestone"
   },
-  "updated_at": "2026-09-16T13:48:25.310Z"
+  "updated_at": "2026-09-16T15:00:33.446Z"
 }
