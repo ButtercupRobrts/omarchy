@@ -1,145 +1,161 @@
 # Feature Research
 
-**Domain:** Quality-vs-size tradeoff UX in media transcode/compress-for-sharing tools
-**Researched:** 2026-09-15
-**Confidence:** HIGH on how comparators behave (well-documented); MEDIUM on transferability to a keyboard-first shell menu
+**Domain:** Target-size ("fit under N MB") transcoding in consumer sharing tools — for `omarchy-transcode --target <size>` (SIZE-10) plus a "Custom size…" interactive row
+**Researched:** 2026-09-16
+**Confidence:** HIGH on comparator behavior and achievable accuracy (documented + empirically verified on the installed ffmpeg n9.0.1 in `research/STACK.md`); MEDIUM on which step-down floors feel right for our 3-rung ladder (comparator ladders are taller)
 
 ## Feature Landscape
 
-Two dominant mental models exist in this space, and the choice between them drives everything else:
+This milestone switches the tool's mental model for one opt-in path. v1.1 shipped the **constant-quality model** (pick a CRF tier; size is an approximate consequence). `--target` adds the **target-size model** (pick an outcome; quality — and, under pressure, resolution — is the derived variable). The two models coexist cleanly because they answer different questions: "how good should it look?" vs "will it upload?".
 
-- **Constant-quality (CRF) model** — HandBrake, most ffmpeg wrappers: the user picks a quality level; output size is a variable consequence. Size feedback is necessarily approximate (±20–30%, content-dependent).
-- **Target-size model** — 8mb.video, discord-encode, deepshrink: the user picks an outcome ("fit under N MB"); the tool does bitrate math and a two-pass encode to *guarantee* the size. Quality is the derived variable.
+How the comparators implement target-size, in ascending order of machinery:
 
-This milestone is locked on the CRF model (medium = today's exact flags, table-based estimates). The research below validates that choice for a "quick share" flow and maps what users expect within it.
+| Tool | Budget model | Accuracy mechanism | Under-pressure behavior | UX surface |
+|------|-------------|--------------------|-------------------------|------------|
+| discord-encode | `total = size×8192/dur`, capped at 10 Mbps | Two-pass x264 ABR | None — just encodes at the derived rate | `-size <MB>` flag, default 10 |
+| 8mb-Video-Compressor | ~90% video / 10% audio split | Two-pass VP9 + `-fs 8M` hard cap | Adaptive scale: ≥900k keep, 400–889k→480p, <400k→360p | Fixed 8 MB target |
+| ffmpeg4discord | size/duration minus `-a 96k` audio | Two-pass **loop** — re-encodes until under target (`--approx` skips the loop) | `-r` explicit resolution only; no auto step-down | CLI flags + JSON config + web UI |
+| ffmpeg-shrinkwrap | `TargetSizeMB` (default 9.8) − audio | Two-pass x265 + bitrate-convergence retries (max 3) | Waterfall: retry → 720p rescue at 500k floor → CRF 28 last resort → keyframe-aware split | PowerShell/Bash, tunable floors |
+| deepshrink | `target×8×(1−0.02) − audio×dur`; audio snapped to a step ladder that leaves ≥60k video | Two-pass + **one** correction encode on overshoot | Resolution ladder (1080→144p, min-bitrate per rung); `Infeasible` (exit 4) below every floor | `--target`, `--reduce %`, `--for discord/email/…`, `--dry-run` |
+| 8mb.video / 8mb.local | Same size/duration math | Two-pass; 8mb.local auto-retries when output >102% of target | 100 kbps minimum-bitrate error dialog ("Encode Anyway" override) | Web UI, preset buttons 8/25/50/100 + custom field |
+| HandBrake | **Removed the feature** — see below | — | — | — |
 
-### Table Stakes (Users Expect These)
+The pattern that matters: every credible implementation converges on the same three moves — **subtract audio, reserve container overhead (~2%), two-pass** — and they differ only in how hard they chase the last few percent (retry loops) and how far down the resolution ladder they're willing to go (480p/360p/240p rungs we don't have).
 
-Features users assume exist. Missing these = product feels incomplete.
+## Table Stakes (users expect these)
 
-| Feature | Why Expected | Complexity | Notes |
+| Feature | Why expected | Complexity | Notes |
 |---------|--------------|------------|-------|
-| Named quality tiers (high/medium/low) | Every consumer flow uses plain language; raw CRF numbers appear only in power-user tools (ShareX form fields, HandBrake advanced) | LOW | Map tiers to CRF/fps internally; never surface the number |
-| A pre-selected sane default | HandBrake presets ship tuned defaults; 8mb.video defaults to 8MB. The "just hit Enter" path must exist | LOW | `medium` pre-highlighted via new `defaultIndex` in `omarchy-menu-select` (TRANSC-05) |
-| Some size signal before committing | Mobile compressors show live estimated size; HandBrake's preset tables give qualitative Small/Average/Large. Users consistently ask "how big will it be?" | MEDIUM | `ffprobe` duration × per-tier bitrate table → "~N MB" subtext (TRANSC-03) |
-| Actual output size at completion | Universal in compressor tools (before/after stats, "post-mortem reports"); closes the estimate→reality loop | LOW | `stat` the output in the completion notification (TRANSC-04) |
-| Non-interactive parity | Every CLI comparator (`discord-encode -size`, `deepshrink --target`, ShareX actions) accepts args; a menu-only feature breaks scripting | LOW | 4th positional arg; omitted/`medium` reproduces current flags byte-for-byte (TRANSC-02) |
-| Honest approximation labeling | CRF output is content-adaptive; estimators universally caveat ±20–30%. "~" prefix is the honest signal | LOW | "~14 MB", never "14.2 MB" |
+| Bare-number input meaning MB | Every comparator accepts `-size 25` / `--target 8MB` / a plain number field; MB is the universal unit of the problem | LOW | Accept `25`, `25M`, `25MB`, `25m`, `1.5G`; `numfmt --from=iec` is stricter than free text deserves — regex-gate then normalize (STACK.md verified the accept/reject table) |
+| Two-pass encode, not single-pass ABR | Single-pass `-b:v` drifts badly on mixed content (measured 7.18 Mbps actual on a 6 Mbps target, ~20% over); two-pass lands ~0.1–1% (5,992/6,000 kbps measured; 99.0–99.9% of target in ffmpeg-video-filesize's tests). The accuracy IS the feature | MEDIUM | Pass 1 = `-an -f null /dev/null` + `mktemp -d` passlogfile; verified end-to-end on n9.0.1 for both libx264 and libx265 |
+| Audio carved out of the budget | Fixed audio (our 192k) is 1.4 MB/min — on a 10 MB target over a 5-min clip it eats 70% of the budget before video sees a bit. Every comparator subtracts audio first | LOW | `video_audio_kbps` already returns 192-or-0 — drop-in. Real design question is what happens when even audio doesn't fit (see below) |
+| Container-overhead reserve | mp4 moov/mdat + faststart rewrite cost ~1–3%; budgeting every last bit to media overshoots. deepshrink reserves 2%, ffmpeg-video-filesize 2%, community guides ~2% | LOW | One constant in the awk math; combined with two-pass's natural slight-undershoot it lands "at or just under" — which is what a size target *should* mean |
+| Honest refusal when infeasible | deepshrink exits 4 `Infeasible` below 60 kbps video; 8mb.video shows a 100 kbps-minimum error. Refusing beats encoding mush — and matches the milestone's own "honest refusal below every floor" | LOW | Needs a stated floor so the refusal can name the achievable minimum ("can't fit 10 MB into 12 minutes — ~18 MB minimum at this duration") |
+| Resolution step-down on insufficient budget | Every serious comparator does this (deepshrink's ladder, shrinkwrap's 720p rescue, 8mb-compressor's thresholds). Bitrate starvation at high res looks *worse* than a smaller frame at the same budget | MEDIUM | Our ladder has 3 rungs (4k/1080p/720p) vs comparators' 5–6; floors need grounding (see Accuracy section). Below 720p floor → refuse, or extend the ladder — design call |
+| Actual size reported at completion | Universal "before/after" reporting in compressors; already shipped (SIZE-02) | FREE | The notification becomes the promise-keeper: "Saved… (23 MB)" against a 25 MB target is self-verifying |
+| Non-interactive + interactive parity | `discord-encode -size`, `deepshrink --target`, ffmpeg4discord `-s` — the flag is the primary interface everywhere; but the whole point of the menu row is reaching it without a terminal | LOW-MEDIUM | `--target` flag + "Custom size…" row → `omarchy-menu-input` (already shipped; zero QML work) |
+| Mutual exclusivity with quality tier | `--target` sets bitrate; `[quality]` sets CRF — they're contradictory inputs | LOW | Reject `--target` + 4th-positional-quality together, early, before the start toast (v1.1 hoisted validation for exactly this reason) |
 
-### Differentiators (Competitive Advantage)
+## Differentiators (worth doing, not required)
 
-Features that set the product apart. Not required, but valuable.
-
-| Feature | Value Proposition | Complexity | Notes |
+| Feature | Value proposition | Complexity | Notes |
 |---------|-------------------|------------|-------|
-| Per-option size estimate as subtext on quality rows | Mobile apps (Video Compressor HD, video_compress_kit) offer a live estimate; almost no keyboard/menu tool does. Turns an abstract tier into a concrete decision | MEDIUM | Estimate = duration × tier bitrate; feasible only because resolution is already chosen — see dependency notes |
-| Estimate→actual feedback loop in notification | No comparator shows both "we guessed ~X" up front and "it landed at Y" on completion. Calibrates user trust in the table over time | LOW | Falls out of TRANSC-03 + TRANSC-04 together |
-| Intent-based presets ("discord" → fits 10MB) | 8mb.video's whole success is naming the outcome, not the setting. One-word answer to "will this upload?" | HIGH | Requires either verified bitrate ceilings per tier or target-size mode; real intent presets need guarantees a CRF table can't give — candidate for v2 |
-| Target-size two-pass mode | discord-encode/deepshrink guarantee ≤ N MB via bitrate math + two passes. The only way to make "fits X" a promise instead of a guess | HIGH | ~2× encode time; contradicts "fast default path" if it ever becomes default. Keep as opt-in mode if added at all |
-| Same quality vocabulary for gif | gif quality expressed as fps tiers under the same high/medium/low names — coherent UX across formats | LOW | Already planned (TRANSC-01); gif estimates are a stretch (palette encoding doesn't follow bitrate tables cleanly) |
+| "Custom size…" as a 4th quality-menu row | No keyboard/menu comparator has this — the sharing-friendly answer ("fit under 10 MB") lives *inside* the same prompt as the tiers instead of a separate mode | LOW | `omarchy-menu-input` exists today; the row fits the `\tlabel\tsubtext` wire format; sentinel label hits `select_quality`'s re-validation chokepoint (STACK.md flags this is the *intended* interception point) |
+| Effective-resolution honesty | When the budget forces 4k→720p, the done notification should name the *actual* output ("Transcoded to 720p mp4"), not the requested one. Comparators silently downscale; we already have the notification slot to say so | LOW | Falls out of passing the resolved (not requested) resolution to the toast — but it's a behavior nobody else bothers with |
+| Step-down grounded in the existing ladder | Comparators keep encoding at 360p/240p/144p; a *sharing* tool can hold a higher dignity floor — refuse below 720p rather than ship a thumbnail. Opinionated restraint is on-brand | LOW | If dogfooding shows 720p-refusals on real targets, adding `scale=-2:480`/`-2:360` rungs is ~4 lines later — defer, don't design |
+| One-shot overshoot correction | deepshrink corrects once; 8mb.local retries at >102%; ffmpeg4discord loops until under. A single "measure→adjust→re-encode" catches pathological overshoot without a convergence loop | MEDIUM-HIGH | A third pass's worth of encode time on the rare miss. **Recommend defer** — the 2% reserve + natural undershoot covers typical content, and the done notification reports the truth either way. Land it only if dogfooding produces real overshoots |
+| Derived-plan transparency | deepshrink's `--dry-run` shows the plan before encoding. Our cheap equivalent: the start toast or the input-prompt echo can name the implied parameters ("10 MB over 3:12 → ~350 kbps → 720p") | LOW | Optional; honest-about-derivation is on-brand ("trade quality for size *knowingly*") but toast space is tight — design call |
+| Intent presets ("for discord" → 10 MB) | 8mb.video's whole success is naming outcomes; `--for discord` is one word vs. remembering a number | LOW to ship, ONGOING to maintain | **Platform limits rot:** Discord went 8 MB → 25 MB → 10 MB in ~2 years (deepshrink ships a "verify against the current service" caveat for exactly this). A bare `10` is durable; `discord` needs a maintainer. If it ships, keep it a thin alias for a number — probably v1.x, not this milestone |
 
-### Anti-Features (Commonly Requested, Often Problematic)
+## Anti-Features (commonly requested, problematic here)
 
-Features that seem good but create problems.
-
-| Feature | Why Requested | Why Problematic | Alternative |
+| Feature | Why requested | Why problematic | Alternative |
 |---------|---------------|-----------------|-------------|
-| Bitrate slider / raw CRF entry | "Give me control" — ShareX exposes CRF number boxes | Demands codec literacy; x264 CRF is logarithmic (~12.8% size change per point, ±6 ≈ half/double) — meaningless to most users; breaks keyboard-minimal menu | Named tiers over tuned internal values |
-| Codec sprawl (x264/x265/VP9/AV1 per encode) | "Why not AV1?" | Decision paralysis in a "quick share" flow; each codec needs its own estimate table and compatibility story. Omarchy's contract is opinionated defaults | Keep the existing implicit choice (x265 only at 4k); revisit only if compatibility complaints appear |
-| Fake precision estimates ("14.2 MB") | Looks more rigorous | CRF is content-adaptive: same settings yield wildly different sizes on grainy vs. flat content. False precision erodes trust when reality diverges | "~14 MB" rounded to 2 sig figs + actual size at completion |
-| Sample-encode preview for accurate size | HandBrake docs push "encode a few chapters to check" | Costs real encode time inside a flow whose whole point is speed; locked decision already rules this out | Table-based "~" estimates |
-| Estimates on BOTH resolution and quality steps | "More information is better" | Resolution-step estimate must assume a quality → either a lie or a "~20–90 MB" range too wide to act on. Pure noise | Estimate once, on the final decision (quality), where all inputs are known |
-| Guaranteed size claims without two-pass | Users want "under 10MB" assurance | CRF cannot promise a ceiling; claiming one is dishonest and will be wrong on complex sources | If guarantees are needed, that's target-size mode (v2) — never imply one from a CRF estimate |
-| Remember-last-quality / per-format sticky defaults | "Save me the prompt" | Silent behavioral drift between runs; the medium default exists precisely to be predictable | Keep stateless; positional arg covers repeat non-interactive use |
+| Guaranteed-byte promises ("always under N") | The Discord use case is literally "must not exceed" | Two-pass is typically ±1–3%, and pathological content (very short clips where fixed overhead dominates, multi-audio sources mis-budgeted) can overshoot. HandBrake *removed* target-size because "the error margin is too high" generated endless complaints — and theirs was single-pass, which is ~20% off, not our ~2%. The lesson isn't "don't do it," it's "don't claim a guarantee the math doesn't have" | Frame it as "aims at-or-under; typically lands within a few %"; the done notification reports actual. If a hard ceiling is ever needed, it's one correction pass — not a slogan |
+| `-fs <bytes>` hard cap | Looks like a free guarantee | It *truncates the encode mid-stream* — produces a short, abruptly-ending file. An abort valve, not targeting. Verified anti-pattern in STACK.md | Two-pass + overhead reserve |
+| Encode-until-converged retry loops | ffmpeg4discord/8mb.local do it; guarantees "under" | Each retry is a full extra pass (or two); on a laptop a 4k clip means 10+ minutes to chase 2%. A sharing tool's promise is "fast path to a file that fits," not "provably minimal" | 2% reserve + report actual; defer single-correction-pass |
+| Resolution step-**up** / spending leftover budget on upscale | "Budget remains — why not 4k?" | Upscaling never adds information; it burns the user's budget on pixels the source didn't have. Current code *does* upscale (`scale=-2:2160` on a 1080p source); target mode should cap effective height at `min(requested, source)` — better use of every bit | Cap at source height in target mode |
+| Codec selection under `--target` (VP9/AV1 for better bits-per-pixel) | "AV1 would fit 10 MB at better quality" | Decision paralysis in a quick-share flow; VP9/AV1 two-pass is dramatically slower; every codec needs its own floor table. The existing implicit x265-at-4k choice already encodes the project's opinionated-defaults contract | Keep the resolution-gated codec split exactly as-is |
+| `--reduce <pct>` mode | deepshrink offers it | Answers a different question ("smaller" vs "under N") — nobody's upload limit is a percentage | Skip; if ever wanted it's `stat`-and-multiply over the same machinery |
+| Remembering the last target / default target | "I always want 10 MB" | Silent state drift between runs; v1.1 already decided stateless is the contract | Repeat the flag; shell history exists |
+| gif `--target` of any kind | Symmetry | **Verified:** gif encoder ignores `-b:v` entirely (byte-identical output at 100k vs 5000k — palette/fps/dither drive size, not rate control) | Refuse with an error, as specced; a sample-encode loop is deferred SIZE-12 territory |
+| Audio drop / mute flag | Frees ~1.4 MB/min for video | Real feature (8mb-compressor has MUTE, deepshrink `AudioChoice::Drop`) but a second axis the one-flag feature doesn't need; refusal-with-explanation covers the pressure cases | Defer; if the refusal message says "minimum ~N MB *with audio*," the door stays open |
 
-## Feature Dependencies
+## How target-size actually works (the math every comparator shares)
 
 ```
-[Quality menu step]
-    └──requires──> [ffprobe duration probe + bitrate table]
-    └──requires──> [resolution already chosen]  (sequential flow guarantees this)
-    └──requires──> [defaultIndex in omarchy-menu-select]  (medium pre-highlight)
-
-[Per-row size estimates]
-    └──requires──> [ffprobe duration probe + bitrate table]
-    └──enhanced-by─> [actual size in completion notification]  (calibration loop)
-
-[Intent presets ("discord")]
-    └──requires──> [target-size two-pass mode]  ──conflicts──> [fast single-pass default path]
+usable_kbps  = target_bytes × 8 ÷ 1000 ÷ duration_s × (1 − 0.02)   # container reserve
+video_kbps   = usable_kbps − audio_kbps                            # 192 or 0 today
 ```
 
-### Dependency Notes
+Then: pick the highest resolution rung whose floor ≤ `video_kbps` (and ≤ requested, ≤ source); if `video_kbps` < every floor → refuse with the achievable minimum; else two-pass at `video_kbps`.
 
-- **Quality step requires the resolution step first:** the estimate needs resolution to pick a bitrate-table row. The existing file → format → resolution order already guarantees this; quality slots in last.
-- **Per-row estimates require ffprobe + a table:** one `ffprobe` call for duration (~ms), multiplied by per-(format, resolution, quality) bitrate entries. No encode needed.
-- **defaultIndex requires a `omarchy-menu-select`/`Menu.qml` change (TRANSC-05):** the "Enter = medium" contract depends on plumbing a default row index through the select payload.
-- **Intent presets conflict with the CRF tier model:** "fits Discord free tier" is a promise about bytes; CRF makes promises about quality. Delivering it honestly requires two-pass target-size encoding — a different mode, not a fifth tier.
+**Audio under pressure.** Today's fixed `-b:a 192k` breaks first on tight budgets — a 10-min clip at 10 MB has a *total* budget of ~137 kbps, less than the audio alone. Comparators solve this two ways: snap audio down a step ladder (deepshrink: 192→128→96→64… picking the highest step that still leaves ≥60k video) or expose it as a flag (ffmpeg4discord `-a 96`, shrinkwrap `MinAudioBitrate 64`). For this tool the honest minimal version is: try 192k; if it doesn't fit, step to ~96k then ~64k; if even 64k audio + minimum video exceeds the budget → refuse. Three constants in a `case`, not a new subsystem.
 
-## MVP Definition
+**Floor grounding.** Comparator floors for H.264-class content: deepshrink's ladder wants ≥2.5 Mbps for 1080p, ≥1.2 Mbps for 720p; 8mb-compressor keeps source res ≥900 kbps and drops to 480p below it; STACK.md's grounding is ~2 Mbps / ~800k / ~400k for 2160p/1080p/720p minimum-watchable. The spread is real (content-dependent — screencasts tolerate far less than action footage), so treat floors as heuristics with a refusal below the last rung, not physics. Recommended shape for our 3-rung ladder: derive `video_kbps` → step down while below the current rung's floor → refuse under ~400k at 720p.
 
-### Launch With (v1.1)
+## Accuracy — what two-pass can and cannot promise
 
-Minimum viable product — what's needed to validate the concept.
+Measured/observed across the comparators:
 
-- [ ] Quality step for video only (mp4 CRF tiers, gif fps tiers) — the core interaction being validated (TRANSC-01)
-- [ ] `medium` pre-highlighted; omitted/`medium` reproduces today's flags exactly — zero-friction default path and non-interactive safety (TRANSC-02, TRANSC-05)
-- [ ] "~N MB" estimate subtext on mp4 quality rows — the differentiating feedback, at the step where all inputs are known (TRANSC-03)
-- [ ] Actual size in completion notification — closes the loop (TRANSC-04)
-- [ ] Pictures skip the step entirely; quality suffix only when non-default — protects the unchanged picture flow (TRANSC-06)
+- **Typical case: lands ~1–3% under target.** Two-pass hits the *video stream* bitrate to ~0.1–1% (5,992 vs 6,000 kbps); add 2% container reserve and AAC's accurate CBR and the file lands just under nominal. STACK.md's empirical run: 241 KB actual vs ~260 KB nominal budget (~7% under on a 3 s clip — short clips under-run more because keyframe/overhead granularity dominates).
+- **Single-pass is not a substitute:** ~20% drift on mixed content is what got HandBrake's target-size feature axed. If we don't two-pass, we don't have the feature.
+- **Residual overshoot sources:** pathological content, very short durations (overhead granularity), sources whose audio was mis-detected. Rare, single-digit %, and always surfaced by the actual-size notification.
+- **What it cannot promise:** "never exceeds N bytes." The honest contract is *aims at-or-under, typically lands within a few %, tells you the truth at the end* — which is sufficient for "will Discord take it" because platform limits have their own slack and the user sees the real number before uploading.
+- **Hard dependency:** `video_duration` must succeed — no duration, no math. Probe failure → refuse honestly (never silently fall back to a CRF encode under a flag named `--target`).
 
-### Add After Validation (v1.x)
+## UX flow sketch
 
-Features to add once core is working.
+**Non-interactive:**
+```
+omarchy transcode --target 25M clip.mov mp4 1080p
+omarchy transcode clip.mov mp4 720p --target 10M     # flag anywhere; parses like --path
+```
+Errors, all before any toast (v1.1 early-validation convention): `--target` on gif → refuse; on picture → refuse; with positional quality → conflict error; unparseable size → usage error; undetectable duration → honest refusal; budget under every floor → refusal naming the achievable minimum.
 
-- [ ] gif estimate subtext — if mp4 estimates prove useful; needs its own table since palette-gif size tracks fps/area, not bitrate
-- [ ] Range estimates on resolution rows — only if users report picking resolution blind; format "~a–b MB" honestly
+**Interactive (mp4 path):**
+```
+file → format(mp4) → resolution → Select quality:
+   high     CRF 18 · ~42 MB
+   medium   CRF 23 · ~24 MB        ← Enter lands here (unchanged)
+   low      CRF 28 · ~9 MB
+   Custom size…   fit under a target   → omarchy-menu-input "Target size (e.g. 25M)"
+```
+Picking the row summons `omarchy-menu-input`; the typed text goes through the same parser as `--target` (one parser, one validation path). Esc at input = abort like every other prompt; empty submit returns exit-0-with-empty (STACK.md quirk) — treat as invalid input, not cancel. Re-prompt once on garbage vs error-out: design call, lean re-prompt (the user is already mid-gesture).
 
-### Future Consideration (v2+)
+**Notifications:** start toast unchanged in shape ("clip.mov to mp4 (1080p)" — or name the target: "…(1080p, ≤25M)"); done toast already reports actual size — the only honesty-critical tweak is that the resolution it names must be the *effective* one after step-down.
 
-Features to defer until product-market fit is established.
+**Naming:** `stem-1080p-25M.mp4` — pass the normalized target through `output_path`'s 4th arg; self-documenting and collision-free vs. tier-named outputs.
 
-- [ ] Target-size two-pass mode (`--target 8MB` / "discord" intent preset) — high value for the Discord use case but 2× encode cost and a parallel code path; validate demand first
-- [ ] Audio-quality tier or mute option — second-most-common knob after video quality, but adds a dimension the three-tier model doesn't cleanly hold
+## Dependencies on shipped v1.1 work
 
-## Feature Prioritization Matrix
+| v1.1 piece | What `--target` reuses |
+|------------|------------------------|
+| `video_duration` (:162) | The whole budget formula's denominator — probe-failure → refuse, mirroring `estimate_label`'s honesty convention |
+| `video_audio_kbps` (:172) | The audio carve-out, already 192-or-0 conservative |
+| `estimate_label`'s awk+MiB convention | Same float-math style; target parse should land on the same MiB-labeled-MB scale the notification reports |
+| `output_path` 4th arg + dedupe | Target string becomes the filename suffix; `[[ -e || -L ]]` dedupe already prevents the overwrite-prompt hang |
+| `select_quality` wire format + strip-at-first-tab re-validation | "Custom size…" is a 4th `\tlabel\tsubtext` row; the re-validation case is the intended interception point for the sentinel |
+| `omarchy-menu-input` | Shipped today — `mode:"input"` needs zero Menu.qml/menu-select changes |
+| Actual-size completion notification (SIZE-02) | Becomes the promise-verification step for free |
+| Early validation hoisting (v1.1 close) | `--target` format/gif/picture/quality-conflict checks belong in the same pre-menu, pre-toast block |
+| `transcode-quality-test.sh` argv-stub harness | Two-pass = two recorded invocations (`-pass 1`, `-pass 2`); extend the stub, no new harness |
 
-| Feature | User Value | Implementation Cost | Priority |
-|---------|------------|---------------------|----------|
-| Named quality tiers for video | HIGH | LOW | P1 |
-| Pre-highlighted medium default | HIGH | LOW-MEDIUM | P1 |
-| Per-row "~" size estimates (mp4) | HIGH | MEDIUM | P1 |
-| Actual size in notification | MEDIUM | LOW | P1 |
-| Pictures skip step / conditional suffix | HIGH | LOW | P1 |
-| gif size estimates | LOW | MEDIUM | P2 |
-| Intent presets / target-size mode | MEDIUM | HIGH | P3 |
+## In this milestone vs. deferred
 
-**Priority key:**
-- P1: Must have for launch
-- P2: Should have, add when possible
-- P3: Nice to have, future consideration
+**In (per PROJECT.md goal + this research):**
+- `--target <size>` flag (mp4 only): parse/normalize/validate early; two-pass with overhead reserve and audio carve-out
+- Resolution auto-step-down within the 3-rung ladder + refusal below the 720p floor (floor values are a plan-level pick — grounding above)
+- Audio step-down (192→96→64k) or refuse-instead — must be decided; without it, tight-but-legit targets refuse prematurely
+- "Custom size…" quality-menu row → `omarchy-menu-input` → shared parser
+- gif/picture refusal; `--target`×quality mutual exclusion; effective-resolution in done toast; `stem-res-NM` naming
+
+**Deferred (tracked):**
+- One-shot overshoot correction — land only if dogfooding shows real overshoots
+- Intent presets / `--for discord` — needs a maintainer-owned limits table; thin-sugar over `--target`, fine as v1.x
+- Lower rungs (480p/360p) — add only if refusal bites in practice
+- Audio drop/mute flag; `--reduce %`; gif target (SIZE-12 adjacent); VMAF search (deepshrink territory — not ours)
 
 ## Competitor Feature Analysis
 
-| Feature | HandBrake | 8mb.video / CLI compressors | ShareX | Our Approach |
-|---------|-----------|------------------------------|--------|--------------|
-| Quality model | CRF slider (0–51, logarithmic) + presets bundling speed/res/quality | None — quality is derived from a size target | Raw CRF number box + preset dropdown | Three named tiers mapped to CRF (mp4) / fps (gif); medium = current flags |
-| Pre-encode size info | None numeric; preset tables say "Small/Average/Large"; docs recommend test-encoding chapters | The chosen target IS the size — guaranteed by two-pass | None | "~N MB" per-row estimate via duration × bitrate table |
-| Post-encode size info | Output file on disk | Before/after stats common ("post-mortem reports") | Output file on disk | Actual size in completion notification |
-| Default path friction | Pick preset, hit start | Pick size, upload | Configure once in settings | file → format → resolution → Enter on medium; 4th positional arg skips all prompts |
-| Where the estimate lives | N/A (refuses to estimate) | N/A (guarantees instead) | N/A | Final decision step (quality), where resolution+format are already known |
-
-**On estimate placement:** Mobile compressors show one live estimate that updates as any parameter changes — the functional equivalent of "estimate shown when all inputs are set." In a sequential menu, that means the last step. An estimate on the resolution step would need either an assumed quality (dishonest) or a range wide enough to be useless ("~20–90 MB"). HandBrake sidesteps this by bundling everything into one preset row; we approximate the same single-decision-with-size-info by putting the estimate on the final step.
+| Capability | HandBrake | Discord-ecosystem CLIs | 8mb.video/.local | deepshrink | Our approach |
+|-----------|-----------|------------------------|------------------|------------|--------------|
+| Size model | Removed target-size; CRF or avg-bitrate+2pass | `-size`/`-s`/`--target` flag | Web preset buttons + custom | `--target`/`--reduce`/`--for`/`--dry-run` | `--target <size>` flag + "Custom size…" row |
+| Passes | 2-pass optional (turbo first pass) | 2-pass standard | 2-pass + auto-retry >102% | 2-pass + one correction | 2-pass, accept tolerance, report actual |
+| Audio | User-set | Fixed/configurable (96k/128k) | ~10% of budget | Step-ladder fit (≥60k video floor) | 192k→96→64 step-down or refuse |
+| Resolution | User-set | `-r` explicit, or fixed thresholds | Auto | Ladder to 144p | Step down within 4k/1080p/720p, refuse below |
+| Infeasible | n/a | Encode anyway / min-bitrate dialog | 100k error + "Encode Anyway" | `Infeasible` exit 4 | Refuse naming the achievable minimum |
+| Undershoot policy | n/a | Loop until under (optional `--approx`) | Auto-retry | Correct once | Report actual; no chase |
+| Guarantee language | Refused the feature over accuracy | "smash into 25MB" | "exact file sizes" | "lands under" | "aims at-or-under; reports actual" |
 
 ## Sources
 
-- HandBrake docs: Adjusting Quality (recommended RF ranges), Constant Quality vs ABR ("output size is unpredictable"), Official Presets + Performance tables (qualitative Small/Average/Large sizes)
-- 8mb.video and ecosystem coverage (VideoProc, HitPaw, Wondershare writeups): target-size UX — pick 8/25/50/100MB, tool handles the rest
-- GitHub CLI wrappers: aWZHY0yQH81uOYvH/discord-encode (two-pass ABR, `-size` flag), deeplabua/deepshrink (`--target 8MB`, `--for discord`, `--dry-run`), nunogomes255/ffmpeg-shrinkwrap (bitrate math + rescue-mode fallback chain), crusader290/8mb-Video-Compressor (adaptive downscale when bitrate floor hit)
-- ShareX source: FFmpegOptions.cs / FFmpegOptionsForm.cs — codec/preset/CRF/bitrate exposed as raw form fields
-- Mobile/SDK: MWM Video Compressor HD (real-time size estimation), video_compress_kit (`estimateFileSize` API)
-- Estimators: ffmpeg-cookbook filesize estimator (±30% caveat), favtoo video size estimator (empirical bits-per-pixel, ±20%), Stack Overflow #73673626 (~12.85% size change per CRF point)
-- ffmpeg-cookbook two-pass encoding article: `total_bitrate = (target_MB × 8192) / duration_s` formula, CRF vs two-pass decision table
+- **Repo (read in full this session):** `bin/omarchy-transcode` (arg loop :305-331, helpers :162-299, `select_quality` :247-287, `output_path` :49-73), `bin/omarchy-menu-select` (`--` arg boundary, tab⇥subtext contract), `bin/omarchy-menu-input` (input-mode wrapper), `shell/plugins/menu/Menu.qml` (input routing :27/:558-561/:765-767, submit-is-filterText :1160), `.planning/PROJECT.md` v1.2 goal, `.planning/milestones/v1.1-REQUIREMENTS.md` SIZE-10/11/12 deferral notes, `.planning/research/STACK.md` (v1.2 — two-pass verified on n9.0.1, gif `-b:v` invariance, `-fs` anti-pattern, passlogfile conventions)
+- **Comparator docs/source:** aWZHY0yQH81uOYvH/discord-encode (two-pass ABR, `-size`, 10 Mbps cap); nunogomes255/ffmpeg-shrinkwrap (waterfall: retry → 720p rescue at 500k floor → CRF 28 → split); zfleeman/ffmpeg4discord (two-pass loop until under, `--approx`, `-a 96`); crusader290/8mb-Video-Compressor (resolution thresholds 900k/400k, `-fs` cap, 128k audio); deeplabua/deepshrink `budget.rs` (CONTAINER_OVERHEAD 0.02, ABSOLUTE_MIN_VIDEO_BPS 60k, rung ladder 1080p≥2.5M→144p≥100k, AUDIO_STEPS, `fit_audio_bps`, `Infeasible`); 8mb.video releases (100 kbps minimum dialog); 8mb.local coverage (retry at >102%, 8/25/50/100 + custom UX)
+- **Accuracy evidence:** Martin Riedl two-pass walkthrough (single-pass 7.18M vs 6M target ≈ 20% over; two-pass 5,992k ≈ 0.13% under); andreswatson/ffmpeg-video-filesize (2% margin → 99.0–99.9% of target; GPU encoder overshot 26.29/25); ffmpeg-cookbook two-pass article (`total = MB×8192/dur` formula, `-passlogfile` collision warning, `-an`+`-f null` pass 1)
+- **HandBrake:** GitHub issues #4640/#4622/#1958 + docs — target-size removed for accuracy-driven support burden ("error margin too high… never ending complaints"); recommends against size targeting, prefers CRF
+- **Platform limits:** Discord support docs (free 10 MB, Basic 50 MB, Nitro 500 MB, boosted-server 50/100 MB; 8→25→10 MB history = preset-rot evidence); deepshrink preset table (whatsapp 16 MB, email 20 MB, telegram 2 GB)
 
 ---
-*Feature research for: omarchy-transcode quality selection & size estimation*
-*Researched: 2026-09-15*
+*Feature research for: omarchy-transcode `--target <size>` two-pass mode + Custom size menu row (v1.2)*
+*Researched: 2026-09-16*

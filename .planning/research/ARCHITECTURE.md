@@ -1,205 +1,176 @@
 # Architecture Research
 
-**Domain:** Interactive media transcoding — bash CLI + Quickshell/QML dmenu (Omarchy fork)
-**Researched:** 2026-09-15
-**Confidence:** HIGH — all touch points read end-to-end; upstream PR #6698 diff reviewed in full
+**Domain:** Target-size transcode (`--target <size>`, SIZE-10) for `bin/omarchy-transcode` — two-pass encode with derived bitrate, resolution step-down, and a "Custom size…" interactive row
+**Researched:** 2026-09-16
+**Confidence:** HIGH — every integration point traced in the shipped v1.1 code; input-mode path is existing code, not proposed API; two-pass mechanics verified empirically in `research/STACK.md`
+**Companion docs:** `research/STACK.md` (verified ffmpeg/numfmt/menu-input mechanics), `research/FEATURES.md` (comparator model, floor grounding, math)
 
-## Standard Architecture
+## Integration Map
 
-### System Overview
+### Modified components (all inside `bin/omarchy-transcode`)
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│  ENTRY POINTS (all invoke bin/omarchy-transcode, no shared state)   │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌───────────────────┐  │
-│  │ omarchy-menu.jsonc│  │ Hyprland binding │  │ Nautilus extension│  │
-│  │ trigger.transcode │  │ (utilities.lua)  │  │ transcode.py      │  │
-│  │  (line 69)        │  │                  │  │ (prompts run)     │  │
-│  └────────┬─────────┘  └────────┬─────────┘  └────────┬──────────┘  │
-└───────────┼─────────────────────┼─────────────────────┼─────────────┘
-            └─────────────────────┴─────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────────────┐
-│  bin/omarchy-transcode  — arg parse → prompts → ffmpeg / magick     │
-│    media_type()  output_path()  transcode_picture()                 │
-│    transcode_video()  copy_to_clipboard()  main()                   │
-└───────────┬─────────────────────────────────────────────────────────┘
-            │  prompt/options/selectionFile/doneFile JSON payload
-            ↓
-┌─────────────────────────────────────────────────────────────────────┐
-│  bin/omarchy-menu-select → omarchy-shell → `qs ipc call`            │
-│  → shell/plugins/menu/Menu.qml  openDmenu(payload)                  │
-│  writes "label<TAB>subtext" to selectionFile, touches doneFile      │
-└─────────────────────────────────────────────────────────────────────┘
-            ↓
-     ffprobe (duration) → bitrate table → row subtext (estimates)
-     ffmpeg / magick (actual transcode) → stat/numfmt (actual size)
-```
+| Location (file:line) | Change | Size |
+|----------------------|--------|------|
+| Metadata header `:6-7` | `# omarchy:args=` gains `[--target size]`; add a `--target` example. `test/cli` validates metadata shape | 2 lines |
+| `usage()` `:11-32` | Usage line gains `[--target size]`; Options block gains `--target` | ~3 lines |
+| `main()` locals `:302-303` | Add `target=""` (+ `video_kbps`, `audio_out`, or a packed plan var) | 1 line |
+| Arg loop `:305-331` | New `--target` arm, verbatim mirror of `--path` `:307-310` (shift, `(( $# > 0 ))` value guard → `return 2`, assign). No `--target=X` form — `--path` doesn't have one | ~5 lines |
+| Quality gate `:348-361` | Mutual exclusivity: inside the existing `[[ -n $quality ]]` block, `[[ -n $target ]]` → error, `return 1` (matches the picture-quality rejection's exit code, `:350-351`). Also refuse `--target` + picture here — `$type` is already known | ~6 lines |
+| Video format validation `:380-386` | After the `mp4 \| gif` case: `[[ -n $target && $format == gif ]]` → refuse. Must sit here (not earlier) because format may come from the interactive menu at `:367` | ~4 lines |
+| Quality-menu condition `:411-413` | `[[ $type == "video" && -z $quality ]]` → add `&& -z $target`: a CLI target skips the tier menu entirely | 1 line |
+| Pre-`output_path` `:414-415` | New target-mode block: run planner → overwrite `resolution` with the *effective* rung (see "Step-down naming" below) | ~6 lines |
+| Video dispatch `:417-422` | `[[ -n $target ]]` → `transcode_video_target`; else existing `transcode_video` call unchanged | ~4 lines |
+| `select_quality` `:247-287` | Append one row after the tier loop (`rows+=($'\t'"Custom size…"$'\t'"<subtext>")`, mp4 only) + one sentinel arm in the return case at `:279-285` that hands off to `omarchy-menu-input` | ~12 lines |
 
-### Component Responsibilities
+### New components (all new functions — zero edits inside existing function bodies)
 
-| Component | Responsibility | Typical Implementation |
-|-----------|----------------|------------------------|
-| `bin/omarchy-transcode` | Arg parsing, interactive prompts, encoder flag selection, output naming, notifications | Single bash file, `main()` dispatch, `case` tables for resolution→scale/format→flags |
-| `bin/omarchy-menu-select` | Build select-mode JSON payload, block on tempfile handshake, return selection | Perl `JSON::PP` payload builder (lines 76–87), poll loop on `doneFile` (91–93) |
-| `shell/plugins/menu/Menu.qml` | Render dmenu rows, track cursor (`selectedIndex`), write result | `openDmenu` (861–881), `rebuildDmenuDisplay` (553–603), `finishRequest` (117–135) |
-| `shell/plugins/menu/MenuModel.js` | Pure-logic helpers, unit-testable from node via `run_node_test` | Requirable module (see `menu-test.sh:9`) |
-| `default/nautilus-python/extensions/transcode.py` | Context-menu entry; invokes bare `omarchy-transcode <path>` so all prompts run | `_launch_transcode` (lines 19–34); **no change needed** for this feature |
+| Function | Placement | Job |
+|----------|-----------|-----|
+| `parse_target_size` | Helper block after `output_size_label` (`:299`), before `main` | `25`/`25M`/`25MB`/`25m`/`1.5G` → bytes. Regex-gate first, normalize (strip optional `B`, uppercase unit, bare number → `M`), then `numfmt --from=iec` or awk. One parser shared by the flag and the menu-input path — non-negotiable, it's the "one validation path" property |
+| `plan_target` | Same block | Inputs: input path, target bytes, requested resolution. Probes `video_duration` (`:162`) + `video_audio_kbps` (`:172`), computes `video_kbps = bytes×8÷1000÷dur×(1−0.02) − audio` in awk (same float-math convention as `estimate_label` `:229`), walks the floor table stepping resolution down, prints `resolution video_kbps audio_kbps` on stdout. Refuses (stderr + nonzero) on probe failure or below-every-floor, naming the achievable minimum |
+| `resolution_floor_kbps` (or a case inside `plan_target`) | Same block | Per-rung minimum-watchable kbps — grounding in FEATURES.md (~2000/800/400 for 4k/1080p/720p; plan-level pick). Small case table matching file style |
+| `transcode_video_target` | Same block | Two-pass sibling of `transcode_video` (`:107-148`): pass 1 `-an -f null /dev/null`, pass 2 with `-b:v "${kbps}k"`, `-passlogfile` inside `mktemp -d`, audio+faststart on pass 2 only. Exact flag shapes in STACK.md §"ffmpeg Two-Pass Mechanics" — verified on n9.0.1 |
 
-## Where Each Change Lands
+### Untouched components — verified no changes needed
 
-### 1. `bin/omarchy-transcode` (207 lines today)
+| Component | Why |
+|-----------|-----|
+| `bin/omarchy-menu-select` | Hardcodes `mode:"select"` (`:89`) and that's correct — input prompts route through `omarchy-menu-input`. Do not graft an `--input` flag onto it |
+| `bin/omarchy-menu-input` | Already shipped (58 lines): `mode:"input"` payload `:39`, same `selectionFile`/`doneFile` handshake, `--width` support. Call it directly |
+| `shell/plugins/menu/Menu.qml` | `payload.mode === "input"` routes to `openDmenu` at `:27`; `:866` sets mode; Enter submits `root.filterText` verbatim (`:765-767`, `:1158-1160`); `rebuildDmenuDisplay` early-returns with zero rows for input mode (`:558-561`); card collapses to header-only (`:114-116`). Zero QML work |
+| `transcode_picture` `:75-105` | Pictures never see target mode — refused upstream in `main` |
+| `transcode_video` `:107-148` | Unchanged — target mode gets a sibling function, not a parameter (see additive strategy) |
+| `output_path` `:49-73` | Unchanged — the 4th arg already does suffix-if-non-medium; the normalized target token rides it |
+| `output_size_label` `:291-299` | Unchanged — the done toast's actual-size report becomes the target promise-keeper for free |
+| `default/nautilus-python/extensions/transcode.py` | Invokes bare `omarchy-transcode <path>` (`_launch_transcode` `:26-34`); the Custom-size row reaches it through the existing interactive path automatically |
+| `default/omarchy/omarchy-menu.jsonc:69`, `utilities.lua:87` | Entry points invoke the bare command; no change |
+| `bin/omarchy` router | `omarchy-menu-input` is already registered (group `menu`, `:62`) |
 
-| Location | Change |
-|----------|--------|
-| Metadata header, lines 6–7 | `# omarchy:args=` gains `[quality]`; add an example like `omarchy transcode ~/Videos/demo.mov mp4 1080p low`. `test/cli` validates command metadata (see `agents/skills/command-metadata.md`) |
-| `usage()` lines 11–30 | Usage line gains `[quality]`; add `Qualities: Videos: high, medium, low` block |
-| `output_path()` lines 46–57 | Add 4th param `quality`; emit `stem-resolution-quality.format` only when quality is set **and** ≠ `medium` (TRANSC-06 — default keeps today's `stem-1080p.mp4` name byte-identical) |
-| `transcode_video()` lines 91–121 | Add 5th param `quality`; extend the `case "$format"` arms. `medium` must reproduce current flags exactly: x264 `-crf 23 -preset fast`, x265 (4k) `-crf 24 -preset slow`, gif `fps=10` (TRANSC-02). Suggested tiers: x264 high/low = crf 19/28; x265 21/29; gif fps 15/5. Invalid quality → error like lines 100–102 |
-| New `video_duration()` | `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$input"` → float seconds |
-| New `video_bitrate_kbps()` | Nested `case` on `format`→`resolution`→`quality` returning an assumed kbps (matches existing case-table style; `declare -A` would also work but case fits file style) |
-| New `estimated_size()` | `bytes = duration × kbps × 1000 / 8`, then `numfmt --to=iec --suffix=B` (coreutils — already a platform invariant) → `~45MB` |
-| `main()` line 132 | `local ... quality=""` added |
-| `main()` line 165 | `quality="${positional[3]:-}"` — 4th positional, optional |
-| After resolution block, lines 185–191 | New video-only block: `if [[ $type == "video" && -z $quality ]]` → build rows `"$'\t'high\t~120MB"` … → `omarchy-menu-select "Select quality" … -- --default-index 1` → strip subtext (see § Subtext-return parsing). Must come **after** format+resolution prompts since estimates key on both |
-| Lines 193–199 | `output_path` gains `$quality` arg; completion notification gains actual size: `$(numfmt --to=iec --suffix=B "$(stat -c %s "$output")")` appended to the "Saved and copied…" message |
-
-`transcode_picture()` (59–89) is untouched — pictures never see quality (TRANSC-06). If a caller passes a 4th positional for a picture, recommended behavior: ignore it (or reject with a usage error — pick one and test it).
-
-### 2. `bin/omarchy-menu-select` (99 lines today)
-
-- Line 27 area: add `menu_defaultindex=""`.
-- Post-`--` flag loop, lines 32–53: add a `--default-index` arm mirroring `--width` (value-required guard, assign `menu_defaultindex="$1"`). Kebab-case matches `--maxheight`.
-- Perl payload, lines 76–87: add `$payload->{defaultIndex} = int($ARGV[6]) if length($ARGV[6] // "");` and append `"$menu_defaultindex"` to the argv list — identical pattern to `width`/`maxHeight` (omitted field when flag absent → full back-compat for every existing caller).
-- Header doc comment lines 9–13 and both usage strings (lines 18, 67) mention the new flag; `# omarchy:args=` line 6 unchanged (flags already live behind `[-- menu args...]`).
-- Also update `docs/menu.md` "Select and input modes" (lines 156–167) to document `defaultIndex`.
-
-Alternative considered: a label-based `--default medium` resolved to an index in bash before building the payload. More caller-friendly but more code; index is what the spec names (`defaultIndex`) and the transcode script knows its row order. Label-based can be added later without breaking anything.
-
-### 3. `shell/plugins/menu/Menu.qml` (1480 lines today)
-
-All changes inside `openDmenu` (861–881) plus one property:
-
-- Near `dmenuMaxHeight` (line 62): `property int dmenuDefaultIndex: 0`.
-- In `openDmenu` after line 870: `dmenuDefaultIndex = Math.max(0, Number(payload.defaultIndex || 0))` — same coercion pattern as `dmenuWidth`.
-- Line 874 `selectedIndex = 0` → `selectedIndex = dmenuDefaultIndex`. **Why this is safe:** `rebuildDmenuDisplay` (called via `rebuildDisplay` at line 878) already clamps `selectedIndex` into `[0, count-1]` at lines 596–598, so an out-of-range payload can't wedge the cursor. At open, `filterText` is `""` so `displayModel` indices align 1:1 with `dmenuOptions` indices (the skip-at-572 only happens under a query).
-- `cursorActive` is already `true` in select mode (line 875), so Enter hits `activateIndex(root.selectedIndex)` at line 1157 — the default row is the Enter-default with zero further work.
-- `Qt.callLater(revealCursor)` at lines 600–602 scrolls the default row into view.
-- **Testability recommendation:** put the `Number(payload.defaultIndex || 0)` → clamped-index resolution in `MenuModel.js` (e.g. `dmenuDefaultIndex(payload, optionCount)`) so `menu-test.sh`'s `run_node_test` harness can cover it; `Menu.qml` then calls `MenuModel.dmenuDefaultIndex(...)`. This matches the established split (all menu logic lives in the requirable JS, QML stays thin).
-- Input mode (`mode === "input"`) ignores the field naturally — `cursorActive` stays false.
-
-**Interaction caveat:** `setFilter` (line 722) resets `selectedIndex = 0` on the first keystroke. That's correct — `defaultIndex` is an initial position, not a persistent anchor — but worth a comment so nobody "fixes" it later.
-
-## Data Flow
-
-### Estimate flow (new)
+## Data Flow — target value end-to-end
 
 ```
-$input ──ffprobe──▶ duration_s ──┐
-                                 ├─▶ est_bytes = s × kbps × 1000 / 8
-format+resolution+quality ──case table──▶ kbps ──┘        │
-                                 numfmt --to=iec ◀────────┘
-                                      ↓
-                     row = "\t" + label + "\t" + "~" + size
-                                      ↓
-              omarchy-menu-select … -- --default-index 1
-                                      ↓
-                        selection = "low\t~9MB"
-                                      ↓
-                    quality=${selection%%$'\t'*}
+CLI: --target 25M ──────────────┐
+Interactive: "Custom size…" row ─┤
+                                 ▼
+              ┌── omarchy-menu-input "Target size (e.g. 25M)"  (interactive arm only)
+              │         │ typed text, exit 0; Esc → exit 1 → abort like every prompt
+              ▼         ▼
+        parse_target_size ── regex gate → normalize → bytes
+                                 │   invalid → usage error, exit 1-2, BEFORE any toast
+                                 ▼
+   main() early validation (order matters):
+     type=picture  → refuse (:348 block)
+     quality set   → mutual-exclusion error (:348 block)
+     format=gif    → refuse (:380 block — after format menu)
+                                 ▼
+        plan_target input bytes requested_resolution
+          ├─ video_duration fails      → refuse (no duration, no math)
+          ├─ video_kbps ≥ floor[req]   → keep requested resolution
+          ├─ else step down rungs      → 4k→1080p→720p
+          ├─ (optional) audio step-down 192→96→64 before refusing
+          └─ below floor[720p]         → refuse naming achievable minimum
+                                 ▼  prints "720p <vkbps> <akbps>"
+   resolution := effective rung   ← overwrites the variable, so EVERYTHING
+                                 │   downstream (filename, both toasts)
+                                 │   names the actual resolution
+                                 ▼
+   output_path input mp4 eff_res "25M" → stem-720p-25M.mp4  (dedupe intact)
+                                 ▼
+   start toast: "clip.mov to mp4 (720p)"   — fires once, after planning,
+                                 │           so it already names actual res
+                                 ▼
+   transcode_video_target: pass1 (-an -f null /dev/null)
+                           pass2 (-b:v Nk → real output)
+                                 ▼
+   copy_to_clipboard → done toast "Transcoded to 720p mp4 … (23 MB)"
+                       actual size = promise verification (SIZE-02 reuse)
 ```
 
-### Key Data Flows
+### Step-down vs `output_path` naming — the ordering consequence
 
-1. **Selection return contract:** `activateIndex` (Menu.qml:768) writes `label + "\t" + detail` when a subtext exists. The transcode script must take field 1: `quality=${selection%%$'\t'*}`. Precedent: `bin/omarchy-menu-plugin:36` uses `cut -f2` for exactly this reason.
-2. **Row construction contract:** in `rebuildDmenuDisplay` (Menu.qml:568–571), when an option contains a tab the **first** field is consumed as the glyph/icon. So a no-glyph `label\tsubtext` row must be sent as `"\tlabel\tsubtext"` (leading empty glyph field), or use a real glyph per row. Sending bare `"high\t~120MB"` would render "high" as an icon and "~120MB" as the label — silent breakage.
-3. **Estimate timing:** `ffprobe` runs **only** inside the `type == "video" && -z $quality` prompt branch — a non-interactive call (Nautilus, scripts) never pays for it.
-4. **Actual size:** `stat -c %s` + `numfmt` on the finished output, appended to the existing completion notification at `omarchy-transcode:199`.
+Today `output_path` runs at `:415` on the *requested* resolution. Under `--target`, the planner must run **first** and write the effective rung back into `resolution` before `:415`. Then `output_path`, the start toast (`:418`), and the done toast (`:422`) all name the actual resolution with zero new plumbing — "effective-resolution honesty" falls out of variable reuse, which is also what the FEATURES research recommends over the comparators' silent downscale. The normalized target token (`25M`) passes as `output_path`'s 4th arg → `stem-720p-25M.mp4`, self-documenting and collision-distinct from tier names. Keep the token shape `digits+unit` so it's always filename-safe.
 
-## Scaling / Scope Considerations
+### Flag vs positional quality — precedence
 
-| Concern | Adjustment |
-|---------|------------|
-| Long inputs | `ffprobe` reads container headers only — O(1), no decode; fine on any size |
-| Estimate accuracy | Table values are nominal bitrates for typical screen-share content; prefix `~` and keep one sig-fig-ish rounding. Do not sample-encode — too slow for a menu |
-| gif estimates | Far less predictable than mp4; either ship a conservative MB/s-per-megapixel table or omit subtext for gif rows (labels stay uniform) |
-| Folder batch (PR #6698) | If merged, quality would prompt once per batch or thread through as arg — see below |
+**Mutually exclusive, error early.** `--target` picks a bitrate; positional quality picks a CRF — contradictory inputs (FEATURES table-stakes row). Check inside the existing `[[ -n $quality ]]` gate at `:348` so it dies before menus and before the start toast, consistent with the v1.1 hoisted-validation decision (PROJECT.md Key Decisions). Interactive reachability is through the quality menu's Custom row, not through the flag — so no precedence rule beyond "both set → error" is needed.
 
-## Anti-Patterns
+### Two-pass placement — new function, not a parameter
 
-### Anti-Pattern 1: Bare `label\tsubtext` option rows
+`transcode_video_target` as a sibling function keeps `transcode_video` byte-identical. The resolution→scale case (`:112-120`) and the resolution-gated codec split (`:134-138`) get duplicated — matching the file's own documented convention (`:180-184`: `quality_token` "deliberately duplicates" the CRF table because "a shared table would refactor that code inside the PR conflict window"). Extracting shared `video_scale`/`video_codec` helpers is the cleaner long-term shape but edits `transcode_video`'s body; defer until the upstream PR settles. Passlogfile cleanup: `mktemp -d` + `trap 'rm -rf "$passdir"' RETURN` (or explicit rm) — `set -e` means a failed pass 1 skips pass 2 naturally, but the temp dir needs the trap or it leaks.
 
-**What people do:** `omarchy-menu-select "Quality" "high\t~120MB" …`
-**Why it's wrong:** the first tab-field is eaten as the icon (Menu.qml:569), so the subtext becomes the label and the estimate is lost.
-**Do this instead:** `"\thigh\t~120MB"` (empty glyph) or a real leading glyph.
+### "Custom size…" row → input prompt — the return contract
 
-### Anti-Pattern 2: Reusing `resolution`-style prompt ordering
+`select_quality` builds `\t<label>\t<subtext>` rows (`:273`); the menu returns `label\tsubtext`; `:278` strips at first tab. A 4th row fits the wire format, but the label doubles as the sentinel — match `[[ $selection == "Custom size…" ]]` exactly (the `…` is one U+2026 char; glyph fields never return, so the sentinel must be the label). On match: `omarchy-menu-input "Target size (e.g. 25M)"` → `parse_target_size` → return a prefix-tagged value such as `target:26214400` so `main` can distinguish tier from target at `:412` (`case "$quality" in target:*) …`). The existing re-validation case (`:279-285`) is the interception point — extend it, don't bypass it. Show the row **only when `format == mp4`** — `select_quality` already has `$format`; gif must never offer it.
 
-**What people do:** prompt quality before resolution.
-**Why it's wrong:** the estimate subtext is keyed on format × resolution × quality — quality must come last, as the 4th prompt.
-**Do this instead:** keep file → format → resolution → quality.
+**Input-mode quirks the caller owns** (all verified in Menu.qml / STACK.md):
+- **Empty submit ≠ cancel:** Enter on empty writes `\n` → exit 0 with empty stdout. Treat as invalid (reprompt or error), not Esc. Esc = exit 1 = abort.
+- **Esc is two-stage** with text present (`:1137` clears first); right-arrow also submits (`:1158`). Harmless.
+- No placeholder field — the prompt text is the placeholder (`:1210` dims `prompt + "…"`); no prefill (`filterText` starts `""`, `:877`); no validation/maxLength — all validation is bash-side.
+- Reprompt-once vs error-out on garbage is a plan-level call; FEATURES leans reprompt (user is mid-gesture).
 
-### Anti-Pattern 3: Encoding "default" inside the option string
+### Notifications during a 2× encode
 
-**What people do:** a marker like `"medium*"` or a 4th tab-field the QML special-cases.
-**Why it's wrong:** whatever rides in the row comes back in the selection string; the caller would have to strip it. The payload field keeps presentation out of the return contract.
-**Do this instead:** `--default-index N` → `defaultIndex` payload field → `dmenuDefaultIndex` property.
-
-### Anti-Pattern 4: Changing medium's flags or the default filename
-
-**What people do:** "improve" crf values or always suffix `-medium`.
-**Why it's wrong:** TRANSC-02/06 require omitted/medium to be byte-identical in flags and filename; anything else breaks every existing caller and upstream-diff reviewability.
-**Do this instead:** medium = today's literals; suffix only for high/low.
-
-## Upstream Interaction: PR #6698 (folder transcoding)
-
-PR #6698 (`omacom/omarchy`, open, +326/−33, touches `bin/omarchy-transcode`, `transcode.py`, `migrations/1786437940.sh`, **new `test/shell.d/transcode-test.sh`**) conflicts with this feature at four sites:
-
-1. **`main()` tail.** The PR replaces lines 193–204 (`output=$(output_path …)` + direct transcode calls) with `output=$(transcode_file …)`. Our change edits the same hunk (quality arg, suffix, notification size). Whichever lands second rebases this region — unavoidable textual conflict.
-2. **`output_path` signature.** The PR calls it inside new `transcode_file` with 3 args; we add a 4th (`quality`). Signature change + their new call site = conflict in `transcode_file` and its `transcode_directory` caller.
-3. **Insertion point.** The PR inserts `media_type_for_format`/`transcode_file`/`transcode_directory` between `transcode_video` and `copy_to_clipboard` (~line 132); our new `video_duration`/`video_bitrate_kbps`/`estimated_size` want the same neighborhood. Keep new functions adjacent to `transcode_video` or below `copy_to_clipboard` to shrink the conflict window.
-4. **Test file collision.** The PR creates `test/shell.d/transcode-test.sh`. **Recommendation: name ours `transcode-quality-test.sh`** — avoids an add/add conflict entirely; if the PR merges first, suites coexist.
-5. **Semantics.** The PR's Nautilus `_batch_command` prompts once for format+resolution then runs `omarchy-transcode <path> "$format" "$resolution"` per file — with our feature, each video file would re-prompt for quality. Follow-up needed on whichever side merges second (batch should capture quality once and pass the 4th positional). Our optional-4th-arg design keeps their call sites working unchanged meanwhile.
+The pair is unchanged: start toast once at `:418`, done toast at `:422`. ffmpeg blocks in the foreground either way — two passes just double wall time; there is no progress mechanism to extend. Notes: (a) because planning precedes `:418`, the start toast already names the effective resolution — optionally add `≤25M` to its body; (b) `omarchy-notification-send` supports `-r <id>` replace (`:50`,`:106`) if a "pass 2/2" mid-encode update is ever wanted — optional polish, not required; (c) pass-1 failure under `set -e` dies before the done toast, identical to today's single-pass failure (start-toast orphan on failure is existing accepted behavior).
 
 ## Build Order
 
-1. **Menu `defaultIndex` plumbing** — `omarchy-menu-select` flag + `Menu.qml`/`MenuModel.js` change. Self-contained; every existing caller unaffected (field absent ⇒ index 0). Node-testable via `menu-test.sh` + a payload-capture `omarchy-shell` stub.
-2. **`omarchy-transcode` non-interactive quality** — 4th positional, `transcode_video` flag tables, `output_path` suffix. Testable with zero menu involvement.
-3. **Interactive quality prompt + estimates** — `ffprobe` helper, bitrate table, row building, `--default-index 1`, subtext-strip parsing.
-4. **Completion-notification size** — `stat`/`numfmt` one-liner in `main()`.
-5. **Docs/metadata** — usage text, `# omarchy:*` header, `docs/menu.md`.
+Dependency-directed; each step is a viable atomic commit per the repo convention:
 
-Steps 1–2 are independent and could land as separate atomic commits (Omarchy convention: atomic single-concern commits); 3–4 belong to the transcode commit series.
+1. **`parse_target_size` + `--target` flag + all early refusals** (mutual exclusion, picture, unparseable size; gif refusal after the format menu). Include usage/metadata lines. Nothing encodes yet — every error path is stub-testable.
+2. **`plan_target` + floor table + `transcode_video_target` + main wiring** — planner before `output_path`, resolution overwrite, target-token suffix, video dispatch branch. This completes the non-interactive `--target` path end to end. Steps 1–2 may ship as one commit if the split feels artificial; keep them separate if upstream review prefers small hunks.
+3. **"Custom size…" row + `omarchy-menu-input` handoff + `target:` prefix contract** in `select_quality`/`main`. Depends on step 1's parser; independent of step 2's encoder internals.
+4. **Tests** (extend `transcode-quality-test.sh` — see below) + `docs/menu.md` touch only if the sentinel/prefix contract is documented there (it isn't today — probably no doc change needed; `omarchy-menu-input` is already documented at `docs/menu.md:156-173`).
 
-## Test Coverage (per `test/shell.d` conventions)
+Steps 1→2→3 are strictly ordered (3 needs 1's parser; 2 needs 1's flag). Nothing here touches `omarchy-menu-select`, `Menu.qml`, or `MenuModel.js` — there is no menu-infrastructure step this milestone, a deliberate contrast with v1.1's phase 4.
 
-New `test/shell.d/transcode-quality-test.sh`, stub pattern per `monitor-scaling-test.sh`/`menu-plugin-test.sh`/PR-#6698's test:
+## Test Coverage — extend `transcode-quality-test.sh`, don't build a new harness
 
-- Stub `file` (mime by extension), `ffmpeg`/`magick` (record args, `touch "${!#}"`), `ffprobe` (echo fixed duration), `wl-copy`, `omarchy-notification-send` (record args), `omarchy-menu-select` (record `"$@"`, answer `$FAKE_PICK`), `omarchy-shell` (capture payload JSON; satisfy handshake by writing pick→`selectionFile`, touching `doneFile` — paths parseable from the payload with perl/python3 since JSON::PP is already a script dep).
-- Assert: `medium` and omitted quality → exact current ffmpeg args (`-crf 23` / `-crf 24` / `fps=10`) and unsuffixed filename; `high`/`low` → mapped flags + `-high`/`-low` filename; gif → fps tiers; picture input → menu-select never invoked with a quality prompt; stub returning `"low\t~9MB"` → still produces `*-low.mp4` (subtext stripped); captured menu rows contain `\t`-joined estimates; `--default-index` surfaces as `defaultIndex` in the captured payload; notification text contains the stubbed size.
-- Menu side: extend `menu-test.sh`'s `run_node_test` block against the new `MenuModel.js` helper (default/clamp/out-of-range/absent-field cases); `Menu.qml` itself is covered by the file-read assertion pattern already used at `menu-test.sh:10`.
-- QML visual check per `agents/skills/visual-verification.md`: quality menu opens with cursor on `medium`.
+- **ffmpeg stub** (`:34-48`): records every invocation's `%q` argv — two-pass just records two lines. Assert the `-pass 1` line carries `-an -f null /dev/null` and the `-pass 2` line carries `-b:v <n>k` + `-c:a aac`. **Gotcha verified live:** the stub's `FAKE_OUT_BYTES` arm does `truncate -s N "${!#}"`; for pass 1 `${!#}` is `/dev/null` and `truncate` fails EINVAL (rc=1, prints to stderr — the stub still exits `FAKE_ENCODE_RC` since it has no `set -e`). Harmless noise, but cleaner to teach the stub to skip file creation when the last positional is `/dev/null`.
+- **ffprobe stub** (`:96-114`): `FAKE_DURATION` already drives `video_duration`; `FAKE_AUDIO` drives `video_audio_kbps` — both planner inputs already have knobs. `FAKE_DURATION` unset → probe failure → assert honest refusal.
+- **New stub needed:** `omarchy-menu-input` (record argv, print `$FAKE_INPUT`) for the Custom-row path. Also drive the sentinel pick via `FAKE_PICK=$'Custom size…\t<subtext>'`.
+- **Case rows to add:** `--target 25M` full run → two ffmpeg lines + `stem-720p-25M.mp4`-style name; step-down asserted via `-vf scale=-2:720` on a tight budget; below-floor → nonzero exit + refusal text naming the achievable minimum + empty `$calls` (no toast); `--target`+gif → refuse; `--target`+picture → refuse; `--target`+positional `low` → conflict error pre-side-effects; garbage `--target xyz` → error; Custom row on gif format → row absent from recorded menu argv; empty input-submit → treated as invalid not cancel.
+- **Existing pins that keep v1.1 honest:** the medium-argv literal (`:143-168`), the `out=` names, the no-overwrite-flag grep (`:363`) — all still apply; pass-2 lines contain no `-y`/`-n`.
 
-## Integration Points
+## Additive-Diff Strategy (v1.1 under upstream review — PR #12135)
 
-| Boundary | Communication | Notes |
-|----------|---------------|-------|
-| `omarchy-menu-select` ↔ `Menu.qml` | JSON payload via `omarchy-shell shell summon` → `open(payloadJson)`; tempfile handshake | `omarchy-shell` (line 51–59) passes payload opaquely to `qs ipc` — no shell-side schema; new field is end-to-end additive |
-| `omarchy-transcode` ↔ `omarchy-menu-select` | argv options `[\t]glyph\tlabel\tsubtext`; return `label[\tsubtext]` | Empty-glyph leading tab is mandatory for label+subtext rows without icons |
-| `omarchy-transcode` ↔ ffprobe/ffmpeg/magick | subprocess argv | ffprobe only on interactive video path; numfmt/stat are coreutils invariants |
-| `transcode.py` ↔ `omarchy-transcode` | bare `omarchy-transcode <path>`; prompts run in the spawned terminal | No change required; PR #6698 changes this file (see above) |
+The rebase surface is the concern: any line v1.2 edits is a line that can conflict if upstream asks for v1.1 changes. Rules that follow:
+
+1. **All new logic lives in new functions** appended in one contiguous block between `output_size_label` (`:299`) and `main` (`:301`). Never reorder existing functions.
+2. **`main()` edits are minimal, colocated hunks:** one `local` line, one new case arm next to `--path`, one mutual-exclusion check inside the existing quality gate, one gif-refusal inside the existing video-validation block, one `-z $target` on the menu condition, one pre-`output_path` planner block, one dispatch branch. Each is adjacent-to, not interleaved-with, v1.1 lines.
+3. **Duplicate, don't extract:** `transcode_video_target` duplicates the scale/codec cases rather than refactoring `transcode_video` — the file's own precedent (`quality_token`, `:180-184`) and it keeps the v1.1 function byte-identical.
+4. **Reuse the contracts v1.1 shipped:** `output_path`'s 4th arg, `select_quality`'s `\tlabel\tsubtext` wire + strip-revalidate chokepoint, `video_duration`/`video_audio_kbps` probes, the awk float-math convention, the MiB-labeled-`MB` scale. No signature changes to any existing function.
+5. **Zero files outside `bin/omarchy-transcode`** need edits for the feature itself (menu-input is shipped; only the test file grows). The whole feature is one script + one test file.
+6. **Residual conflict windows** if v1.1 changes under review: the arg loop, the quality gate, `select_quality`'s row list and return case, the `main` tail. These are the same regions v1.1 added — small hunks, rebase-cheap. `transcode_video`, `output_path`, `transcode_picture`, `media_type`, `copy_to_clipboard`, and all four helpers stay untouched.
+
+## Open Design Calls (for the plan, not blocking)
+
+| Call | Options | Lean |
+|------|---------|------|
+| Audio under tight budgets | Step 192→96→64 inside `plan_target`, or refuse at fixed 192k | Step-ladder per FEATURES (3 constants in a case); without it, legit targets refuse early |
+| Garbage at the input prompt | Reprompt once vs error out | Reprompt once |
+| Sentinel return shape | `target:<bytes>` prefix vs separate variable | Prefix on `select_quality`'s stdout — one return channel |
+| Floor values | ~2000/800/400 kbps for 4k/1080p/720p | Per FEATURES grounding; plan picks, tests pin them |
+| Sub-720p rungs | Extend ladder (`scale=-2:480/360`) vs refuse | Refuse — on-brand dignity floor; extend only if dogfooding shows refusals |
+| `--target` + unset resolution | Prompt for ceiling as usual vs default to source | Prompt as usual — resolution keeps its "ceiling" meaning, flag doesn't bypass prompts |
 
 ## Sources
 
-- `bin/omarchy-transcode` (207 lines, read in full)
-- `bin/omarchy-menu-select` (99 lines), `bin/omarchy-menu-input`, `bin/omarchy-menu-file`, `bin/omarchy-shell`
-- `shell/plugins/menu/Menu.qml` (1480 lines; `openDmenu` 861–881, `rebuildDmenuDisplay` 553–603, `activateIndex` 759–787, `finishRequest` 117–135, key handling 1154–1160)
-- `default/nautilus-python/extensions/transcode.py`
-- `test/shell.d/base-test.sh`, `monitor-scaling-test.sh`, `menu-plugin-test.sh`, `menu-test.sh`, `bin-style-test.sh`
-- `docs/menu.md` §"Select and input modes"; `agents/skills/command-metadata.md`; `AGENTS.md`
-- Upstream diff: `github.com/omacom/omarchy/pull/6698.diff` + `spaceXrace/omarchy@add-folder-transcoding` test file
-- `.planning/PROJECT.md` (TRANSC-01…06), `.planning/REQUIREMENTS.md`
+- `bin/omarchy-transcode` (431 lines, read in full; arg loop `:305-331`, quality gate `:348-361`, validation `:379-409`, menu `:411-413`, dispatch `:417-428`; helpers `output_path` `:49-73`, `video_duration` `:162-168`, `video_audio_kbps` `:172-178`, `select_quality` `:247-287`, `output_size_label` `:291-299`, `transcode_video` `:107-148`)
+- `bin/omarchy-menu-select` (120 lines; `--` arg boundary `:32-70`, `mode:"select"` payload `:87-110`, handshake `:81-84`/`:112-119`)
+- `bin/omarchy-menu-input` (58 lines; `mode:"input"` `:39`, same handshake)
+- `bin/omarchy-menu-file` (48 lines; sibling wrapper pattern — pipes find output into `omarchy-menu-select`)
+- `shell/plugins/menu/Menu.qml` (1484 lines, read in full; mode routing `:27`, `openDmenu` `:864-885`, input-mode empty model `:558-561`, submit-is-filterText `:765-767`/`:1158-1160`, `finishRequest` `:118-136`, Esc/cancel `:834-838`/`:1136-1139`, prompt-as-placeholder `:1210`)
+- `shell/plugins/menu/MenuModel.js:497-503` (`dmenuDefaultIndex` — v1.1's helper; untouched this milestone)
+- `test/shell.d/transcode-quality-test.sh` (stub harness `:17-114`, `run_transcode` `:123-132`, assertion style throughout)
+- `test/shell.d/menu-select-test.sh` (payload-capture `omarchy-shell` stub `:19-30` — pattern reusable if menu-side coverage is ever wanted)
+- `test/shell.d/base-test.sh` (`pass`/`fail` `:13-21`, `run_node_test` `:79-126`)
+- `default/nautilus-python/extensions/transcode.py` (`_launch_transcode` `:19-34`)
+- `docs/menu.md:156-173` ("Select and input modes" — the shipped contract)
+- `.planning/PROJECT.md` (v1.2 goal `:11-18`, additive-layering constraint `:22`, key decisions `:73-79`)
+- `.planning/milestones/v1.1-REQUIREMENTS.md:39` (SIZE-10 deferral note)
+- `research/STACK.md`, `research/FEATURES.md` (v1.2 companions — verified ffmpeg mechanics, comparator math, floor grounding)
+- `bin/omarchy:62` (menu group registration), `bin/omarchy-notification-send` (`-r`/replace-id `:50`,`:106`)
 
 ---
-*Architecture research for: omarchy-transcode quality selection + size estimation*
-*Researched: 2026-09-15*
+*Architecture research for: omarchy-transcode `--target <size>` two-pass encoding + Custom size menu input (milestone v1.2)*
+*Researched: 2026-09-16*

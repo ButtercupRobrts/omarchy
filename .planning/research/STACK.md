@@ -1,117 +1,117 @@
 # Stack Research
 
-**Domain:** CLI media transcoding — quality tiers and output-size estimation for `bin/omarchy-transcode` (bash + ffmpeg + ImageMagick)
-**Researched:** 2026-09-15
-**Confidence:** HIGH for CRF tier values, fps-as-gif-lever, and ffprobe-based estimation approach; MEDIUM for the bitrate midpoint table (CRF output bitrate legitimately varies ±2x with content — that's inherent to CRF, not a research gap)
+**Domain:** CLI media transcoding — target output size (`--target <size>`, SIZE-10) for `bin/omarchy-transcode` via ffmpeg two-pass encoding, plus a "Custom size…" free-text row in the interactive quality menu (Menu.qml input mode)
+**Researched:** 2026-09-16
+**Confidence:** HIGH throughout — every ffmpeg flag below was run against the installed n9.0.1 build (two-pass verified end-to-end for both libx264 and libx265; gif bitrate-independence verified empirically), and the menu-input path is already shipped code, not proposed API.
 
-## Recommended Stack
-
-### Core Technologies — no new dependencies
+## Recommended Stack — no new dependencies
 
 | Technology | Version | Purpose | Why Recommended |
 |------------|---------|---------|-----------------|
-| ffmpeg + libx264 | system (Arch `extra/ffmpeg`, unpinned) | mp4 encode at 720p/1080p | Already the tool; CRF mode is the right quality-tier primitive because bitrate floats to hold perceptual quality constant across content types |
-| ffmpeg + libx265 | same package | mp4 encode at 2160p | Same; kept resolution-gated (4k only) to preserve current codec-selection behavior |
-| ffprobe | same package | Duration probe for size estimation | The designed primitive for this: instant container parse, no decode. Nothing cheaper exists without decoding the stream |
-| ImageMagick (`magick`) | system | Picture transcode | Unchanged — pictures get no quality step (TRANSC-06) |
-| `numfmt --to=iec` (coreutils) | system | Humanize estimated + actual byte counts | Exact bytes→human for `stat -c %s` output; repo precedent `du -h` works too but numfmt is cleaner for computed estimates |
-| awk | system | Float math for duration×bitrate | bash can't do floats; awk is already the repo's float-math convention (see `omarchy-hyprland-monitor-scaling`, `omarchy-network-speedtest`) |
+| ffmpeg two-pass (`-pass`, `-passlogfile`, `-b:v`, `-f null`) | n9.0.1 installed; flags stable for >10 yrs | Fit mp4 output to a named byte target | Two-pass is the designed mechanism for *size* targets: pass 1 writes per-frame stats, pass 2 spends exactly the `-b:v` budget. Verified: 500k video + 192k audio over 3.0 s → 241,236 B (x264) / 231,229 B (x265) vs ~260 KB nominal — lands within a few % under target |
+| ffprobe (`video_duration`, `video_audio_kbps`) | same package | Duration + audio presence for bitrate math | Already shipped in v1.1 — `video_duration` (bin/omarchy-transcode:162) and `video_audio_kbps` (:172) return exactly the two inputs the bitrate formula needs. Zero new probing code |
+| `numfmt --from=iec` (coreutils) + bash regex | system | Parse `25M`/`1.5G` → bytes | `--from=iec` uses the MiB convention the completion notification already labels "MB" (MiB arithmetic, PROJECT.md decision). **But it is stricter than free text deserves:** accepts `25M`/`1.5G`/`500K`, rejects `25MB`, `25m`, `25MiB`; bare `25` parses as 25 *bytes*. Pre-validate with a regex, normalize (strip optional `B`, uppercase unit, default bare number to `M`), then feed numfmt — or do the whole parse in awk. Either way the regex gate must come first for friendly errors |
+| awk | system | Bitrate arithmetic (`bytes×8/dur−audio`) | Same float-math convention as v1.1's `estimate_label` (bin/omarchy-transcode:229); bash can't divide floats |
+| `bin/omarchy-menu-input` | already shipped | Free-text "Custom size…" prompt | **Exists today** — emits `mode:"input"` + `selectionFile`/`doneFile` handshake, supports `--width`. `omarchy-menu-select` needs NO changes |
 
-## Quality Tiers — concrete numbers
+## ffmpeg Two-Pass Mechanics — verified on n9.0.1
 
-### x264 (720p, 1080p — `-preset fast` stays fixed)
+Canonical shape (mirroring `transcode_video`'s existing codec/scale flags):
 
-| Tier | CRF | Size vs medium | Why this value |
-|------|-----|----------------|----------------|
-| high | **18** | ~1.8× | Canonical "visually lossless" point on the 0–51 scale; real headroom above the default |
-| medium | **23** | 1× | LOCKED — must reproduce current `-crf 23` exactly (TRANSC-02). Also the encoder's own default |
-| low | **28** | ~0.45× | Floor of the sane delivery range (18–28); beyond ~30 artifacts dominate even at share quality |
+```bash
+passdir=$(mktemp -d)
+# pass 1 — stats only: no audio, null muxer, no faststart
+ffmpeg -i "$input" -vf "$scale" -c:v libx264 -preset fast \
+  -b:v "${kbps}k" -pass 1 -passlogfile "$passdir/2pass" \
+  -an -f null /dev/null
+# pass 2 — full encode: audio + faststart move here
+ffmpeg -i "$input" -vf "$scale" -c:v libx264 -preset fast \
+  -b:v "${kbps}k" -pass 2 -passlogfile "$passdir/2pass" \
+  -c:a aac -b:a 192k -movflags +faststart "$output"
+rm -rf "$passdir"
+```
 
-### x265 (2160p only — `-preset slow` stays fixed)
+- **`-passlogfile` naming:** on n9.0.1 both encoders write `<prefix>-0.log` plus `<prefix>-0.log.mbtree` (x264) / `<prefix>-0.log.cutree` (x265) — identical suffix convention, so no per-codec path handling. Put the prefix inside a `mktemp -d` and delete the directory whole; never enumerate the suffixes.
+- **`-an` on pass 1:** audio is skipped for stats (it doesn't affect rate control) and encoded fresh in pass 2. Saves the AAC encode on the throwaway pass and keeps the null muxer trivially satisfiable.
+- **`-f null /dev/null`:** correct null-muxer spelling on Linux (this codebase is Linux-only).
+- **`-movflags +faststart` on pass 2 only:** it's a muxer-level flag — meaningless on the null muxer, and it does a second file rewrite that belongs on the real output.
+- **Presets:** libx264's `-fastfirstpass` already defaults to `true` (verified via `ffmpeg -h encoder=libx264`), so pass 1 runs reduced-effort settings automatically — do NOT wire a different `-preset` per pass. libx265 honors `-pass`/`-passlogfile` through the same AVOptions (verified; also exposes `-x265-stats` as an alternative spelling — don't use it, `-passlogfile` covers both codecs uniformly).
+- **Bitrate math:** `total_kbps = target_bytes × 8 ÷ duration_s ÷ 1000`; `video_kbps = total_kbps − audio_kbps − overhead`. Reserve ~2–3% for mp4 container + faststart rewrite (x264 two-pass already lands a few % *under* nominal, so a small margin plus its natural undershoot ≈ on-target). `video_audio_kbps` already returns the right 192-or-0 value.
+- **Floors / step-down:** below some per-resolution kbps the picture is mush — that's a quality floor, an encode can't fix it. The existing resolution ladder has exactly three rungs (4k→1080p→720p, `transcode_video`'s scale case at bin/omarchy-transcode:112); stepping *below* 720p needs new `scale=-2:480`/`-2:360` entries — a design decision for the plan, not a stack gap. Rough grounding for floors: 2160p ~2 Mbps, 1080p ~800 kbps, 720p ~400 kbps minimum-watchable for typical content. Below the lowest floor: refuse honestly (milestone language), don't encode garbage.
+- **Failure behavior is free:** `set -euo pipefail` + ffmpeg's nonzero exit on bad input means a failed pass 1 aborts before pass 2 runs — matches the existing single-pass path.
+- **Codec selection stays resolution-gated:** keep x265 for 4k, x264 for 1080p/720p exactly as `transcode_video` does — two-pass works identically on both.
 
-| Tier | CRF | Size vs medium | Why this value |
-|------|-----|----------------|----------------|
-| high | **20** | ~1.6× | Very high quality; x265 CRF 20 ≈ x264 CRF ~15 perceptually |
-| medium | **24** | 1× | LOCKED — reproduces current `-crf 24`. Already quality-biased (≈x264 CRF 19) |
-| low | **28** | ~0.5× | x265's own default; ≈x264 CRF 23 perceptually — "still fine" floor for sharing |
+## GIF Target — confirmed meaningless (refuse, as specced)
 
-**Why the scales differ:** x265 CRF ≈ x264 CRF + 5 for rough perceptual parity (x265 default 28 ≈ x264 default 23). Never copy a CRF number across codecs. **Why ±5–6 steps:** each +6 CRF ≈ halves bitrate for x264 (~5.3 for x265) — so the tiers above produce a meaningful ~2× spread each direction instead of indistinguishable rows. **Why presets stay fixed:** `-preset` trades encode time for size efficiency at a given CRF — it doesn't define "quality" the way users mean it, and varying it per tier muddies the "medium = today's flags" invariant. If `high=18` makes files feel too large, the cheaper alternative is `high=20` (~1.4×).
+**Verified:** same 1 s gif produced byte-identical 263,031 B at `-b:v 100k` and `-b:v 5000k` — the gif encoder (palettegen → paletteuse) has no rate control at all. GIF size is driven by fps, geometry, `max_colors`, and dither — none of which accept a byte budget. `-b:v` is silently ignored. `--target` on gif must error, matching the milestone's "gif refuses `--target`" requirement. (A loop-until-fits sample-encode is a different feature — that's deferred SIZE-12 territory, not this milestone.)
 
-## Size Estimation
+## Menu Input Mode — what's already there
 
-**Primitive:** `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 -- "$input"` — one call, ~ms, no decode. Guard `[[ $dur =~ ^[0-9.]+$ ]]`; some containers report `N/A` — fall back to `-select_streams v:0 -show_entries stream=duration` or just omit the subtext. No better cheap estimator exists; anything content-aware requires decoding.
+`payload.mode === "input"` is supported **today**; `omarchy-menu-select` does not need to change because a dedicated sibling already emits it.
 
-**Formula:** `est_MB = dur_s × (video_kbps + 192) / 8192` via awk. **Include the 192k AAC audio** (24 KB/s ≈ 1.4 MB/min) — at low/720p it's ~25% of the output; skipping it makes low-tier estimates visibly optimistic.
+| Question | Answer (file:line) |
+|----------|---------------------|
+| Does the payload support `mode:"input"` today? | Yes — `Menu.qml:27` routes `select`/`input` to `openDmenu`; `:866` sets `mode`. `bin/omarchy-menu-input` (whole file) builds the payload and handshake |
+| Does `omarchy-menu-select` need changes? | **No.** It hardcodes `mode:"select"` (bin/omarchy-menu-select:89) and that's correct — input prompts go through `omarchy-menu-input`. Don't graft a `--input` flag onto menu-select |
+| Validation in input mode? | **None.** Enter/Return submits `root.filterText` verbatim (Menu.qml:765-767, :1158-1160). All validation is the bash caller's job |
+| Placeholder? | No separate field — the prompt doubles as placeholder: header shows `filterText` at full opacity or `prompt + "…"` dimmed at 0.58 (Menu.qml:1210-1212). No prefill exists (`filterText` always starts `""`, :877) |
+| Options in input mode? | Ignored entirely — `rebuildDmenuDisplay` early-returns for input mode (:558-561); `omarchy-menu-input` doesn't send an `options` field at all |
+| Return contract | `omarchy-menu-input` prints the typed text + `\n`, exit 0 on submit; exit 1 on cancel |
 
-**Video bitrate midpoints (typical mixed content; real output varies ±2x — camera/action higher, screen capture/talking-head lower):**
+**Input-mode quirks the caller must own:**
 
-| Resolution | Codec / CRF tiers | high | medium | low |
-|------------|-------------------|------|--------|-----|
-| 720p | x264 18/23/28 | 2.5 Mbps | 1.5 Mbps | 0.7 Mbps |
-| 1080p | x264 18/23/28 | 5.5 Mbps | 3.0 Mbps | 1.4 Mbps |
-| 2160p | x265 20/24/28 | 16 Mbps | 9 Mbps | 4.5 Mbps |
+- **Empty submit ≠ cancel.** Enter on an empty field writes `\n` to `selectionFile` (1 byte, `-s` true) → prints an empty line, **exit 0**. Cancel is Esc-with-empty-text → `finishRequest(null)` → exit 1. So `omarchy-menu-input` returning empty-with-0 means "user submitted nothing" — treat as invalid/reprompt, not as cancel.
+- **Esc is two-stage:** first Esc clears non-empty text (Menu.qml:1137), second Esc cancels. Expected, but means a user can't Esc-cancel with text present without clearing first.
+- **Right-arrow submits too** (Menu.qml:1158 folds `Key_Right` into the Enter branch). Harmless but undocumented-looking.
+- **Editing keys:** printable chars incl. space appended via the `event.text` path (:1165-1167); Backspace / Ctrl+Backspace / Ctrl+U handled by `Util.editsFilter`/`editedFilter` (shell/Commons/Util.qml:111-126). No regex, no maxLength, no masking — a size field gets whatever the user types.
+- **`--width` works** (`dmenuWidth` applies to the collapsed card, Menu.qml:112); `--default-index`/`--maxheight` are meaningless (no rows) and `omarchy-menu-input` doesn't accept them anyway.
+- **Suggested prompt shape:** `omarchy-menu-input "Target size (e.g. 25M)"` — the example-in-prompt pattern is the only "placeholder" affordance available.
 
-Grounding: 1080p x264 CRF 23 lands ~1–4 Mbps across content (≈2.6 Mbps on high-complexity Blender footage; ~0.8 Mbps on simple content); the table takes midpoints and scales ~∝ pixels across resolutions and ~∝2^((23−CRF)/6) across tiers. Display with a `~` prefix and 1–2 sig figs ("~45 MB") so it reads as an estimate — TRANSC-03 says estimates must be clearly approximate. Actual size post-encode: `stat -c %s "$output" | numfmt --to=iec`.
+## Integration Points
 
-## GIF Tiers
-
-**fps is the right "quality" lever** (TRANSC-01 already decides this): it's the only knob that is both near-linear in output size AND reads to users as quality (smoothness). Recommended: **high = 15 fps, medium = 10 fps (locked, current), low = 5 fps** → ~1.5× / 1× / ~0.5× size. (8 fps is the gentler low if 5 feels too choppy.)
-
-Secondary levers — deliberately untouched: `palettegen=max_colors=N` (256 default; 128 saves ~10–20%, bands on gradients) and `paletteuse=dither=` (sierra2_4a default; `bayer:bayer_scale`/`none` shrink but look worse). Optional pairing: `max_colors=128` on the low tier only. Don't vary lanczos or add a second palette pass.
-
-**GIF estimates: omit them.** GIF size is content-dominated to the point a table is misleading — 10 s of flat desktop capture ≈ 1–3 MB, the same 10 s of noisy camera video at 1080p10 ≈ 20–60 MB (a 20–30× spread vs mp4's ~2×). TRANSC-03 scopes subtext estimates to mp4 anyway. If estimates are ever wanted, scale a coarse per-resolution baseline linearly by fps/10: 720p ≈ 0.4 MB/s, 1080p ≈ 0.9 MB/s, 2160p ≈ 2.5 MB/s — labeled "varies widely".
+- **"Custom size…" row:** `select_quality` (bin/omarchy-transcode:247) builds rows as `\t<label>\t<subtext>` and re-validates the stripped label against `high|medium|low` (:279-285). A 4th row fits the wire format naturally; the return is the *display label*, so the sentinel check is `[[ $selection == "Custom size…" ]]` (or normalize — design call). On match, hand off to `omarchy-menu-input` + the size parser. Note the existing re-validation will reject "Custom size…" as an invalid quality unless the case is extended — that's the intended chokepoint.
+- **`--target` flag:** the arg loop (:305-331) has a clean `--path` precedent for valued options. Parse-and-validate early — format/resolution validation is already hoisted ahead of menus and the start notification (v1.1 close decision); `--target` + gif/picture refusal belongs in the same early block so a bad combination dies before the "Transcoding video…" toast.
+- **Bitrate derivation:** `video_duration` (:162) + `video_audio_kbps` (:172) are drop-in. On `video_duration` failure there's no duration → no bitrate → refuse honestly (same honesty convention as `estimate_label`'s qualitative fallback).
+- **`output_path`:** takes quality as its 4th arg for the filename suffix (:49-72, non-"medium" values append). A target run needs *some* 4th-field token or a naming decision — passing the normalized target (`25M`) produces `stem-1080p-25M.mp4`, which is self-documenting. Design call, cheap either way.
+- **Two-pass + `select_quality` interaction:** `--target` and quality are mutually exclusive inputs (one picks bitrate, the other CRF). CLI precedence rule needed: `--target` + positional quality → error, or `--target` wins — decide in plan, validate early.
+- **Tests:** `test/shell.d/transcode-quality-test.sh` stubs ffmpeg recording `%q`-joined argv and synthesizes output under `FAKE_OUT_BYTES` — a two-pass path just records two invocations (stub sees `-pass 1` then `-pass 2`); extend the same stub, don't build a new harness. `menu-select-test.sh` covers the menu contract if the row shape changes.
 
 ## Installation
 
 ```bash
-# Nothing to install. ffmpeg/ffprobe, imagemagick, coreutils (numfmt),
-# and gawk are all present in the Omarchy default package set.
+# Nothing to install. ffmpeg n9.0.1 (with libx264+libx265), numfmt, awk,
+# mktemp are all present; omarchy-menu-input is already shipped.
 ```
 
-## Alternatives Considered
-
-| Recommended | Alternative | When to Use Alternative |
-|-------------|-------------|-------------------------|
-| Fixed duration×bitrate table | Scale estimate by source bitrate from `ffprobe format=bit_rate` | If real-world testing shows the flat table consistently wrong for the fork owner's actual files. The ratio varies too much with source codec (already-efficient sources re-encode *up* at CRF 18) to be reliably better — keep it simple first |
-| ffprobe duration | mediainfo | Never here — extra dependency for identical data |
-| awk float math | `bc` | awk wins: already the repo's float convention, one fewer tool to spawn |
-| CRF tiers | `-b:v` bitrate tiers | CRF holds *quality* constant; a fixed-bitrate tier would punish complex content and waste bits on simple content — wrong semantics for a quality picker |
-
-## What NOT to Use
+## What NOT to Add
 
 | Avoid | Why | Use Instead |
 |-------|-----|-------------|
-| Two-pass encoding (`-pass 1/-pass 2`) | Meaningless under CRF — pass 1 exists to calibrate a *bitrate* target; CRF deliberately lets bitrate float. Would double encode time for zero benefit | Single-pass CRF (current). Only relevant for a future `--target-size` mode: compute `b:v = (target_bits − 192k×dur) / dur`, run two passes with `-an`+null-muxer pass 1, optionally `-maxrate`/`-bufsize` caps — ~2× encode time, keep as documented future work |
-| `-b:v`/`-maxrate` caps on CRF | Turns quality mode into bitrate mode and reintroduces the "complex content starves" problem CRF solves | Plain `-crf` |
-| Per-tier `-preset` changes | Changes encode time and size-efficiency, not user-visible "quality"; blurs the medium-is-current-flags contract | Keep `fast` (x264) / `slow` (x265) fixed |
-| Picture quality menu step | TRANSC-06: jpg/png flow unchanged, no third prompt | If a CLI-only jpg quality arg lands later: `-quality` 92 / 85 (current) / 75. Do NOT map it onto png — IM's png `-quality` is a zlib-level×10+filter composite; the existing `-define` flags are already correct |
-| Decoding/sampling the input to estimate | Frames-accurate estimates need a real decode — absurd cost for a menu subtext | ffprobe duration + table |
-
-## Stack Patterns by Variant
-
-**If the quality row needs an estimate subtext (mp4):** pass options as `high\t~120 MB` style `label<TAB>subtext` — `omarchy-menu-select` renders subtext under the label, but returns `"label<TAB>subtext"`, so the caller must strip it: `quality="${selection%%$'\t'*}"`.
-
-**If `medium` should be the Enter-default (TRANSC-05):** `omarchy-menu-select` builds its payload via perl `JSON::PP` — add an optional `defaultIndex` integer; `Menu.qml` `openDmenu()` hardcodes `selectedIndex = 0` (shell/plugins/menu/Menu.qml:874) — clamp `payload.defaultIndex` to `[0, options.length-1]` there. All other callers default to 0 unchanged.
-
-**If ffprobe returns empty/`N/A` duration:** build quality rows without subtext — a row with no third field is legal, and a missing estimate beats a wrong one.
+| Changes to `omarchy-menu-select` or `Menu.qml` | `mode:"input"` and its dedicated `omarchy-menu-input` wrapper already exist and are documented (`docs/menu.md` "Select and input modes") | Call `omarchy-menu-input` |
+| `-fs` (file-size limit) | It truncates the encode mid-file when the cap is hit — an abort valve, not a targeting mechanism; produces short/broken outputs | Two-pass `-b:v` |
+| Single-pass `-b:v` (ABR) | Legal and would roughly hit the size, but measurably worse quality-per-bit than two-pass at the same bitrate — the entire point of the feature | Two passes |
+| `-maxrate` / `-bufsize` / `-minrate` | Streaming/decoder-buffer caps; they constrain bitrate *shape*, not total size. Adds failure surface for zero targeting benefit | Plain `-b:v` |
+| `-x265-params stats=…` / `-x265-stats` | `-pass`/`-passlogfile` already drive x265's stat files correctly on n9.0.1 (verified) — hand-wiring duplicates it per-codec | `-passlogfile` uniformly |
+| Per-pass `-preset` switching | libx264 `-fastfirstpass=true` already cheapens pass 1; manual preset divergence adds a flag surface for marginal speed | Same preset both passes |
+| QML-side validation/placeholder/maxLength | Menu.qml has none and the feature doesn't justify growing any — a size string is one regex in bash | Validate in the caller |
+| gif `--target` support of any kind | Verified: `-b:v` is ignored by the gif encoder (byte-identical outputs at 100k vs 5000k) | Refuse with an error |
+| Encode-retry loops to converge on size | Two-pass lands within a few % — chasing the last 2% costs full re-encodes | Accept the tolerance |
+| `bc`, `mediainfo`, `jq` | awk + ffprobe + perl-JSON::PP are the repo's existing conventions | Reuse them |
+| `omarchy-cmd-present` guards on ffmpeg/numfmt | De-facto runtime invariants per v1.1 research | Invoke directly |
 
 ## Version Compatibility
 
 | Package A | Compatible With | Notes |
 |-----------|-----------------|-------|
-| `omarchy-transcode` | system ffmpeg | `ffmpeg` isn't listed directly in `install/omarchy-base.packages` — it arrives transitively (e.g. `ffmpegthumbnailer`, `qt6-multimedia-ffmpeg`). Status quo already relies on it; this change adds no new requirement, but don't add `omarchy-cmd-present` guards — ffmpeg is a de-facto runtime invariant here |
-| ffprobe | ffmpeg | Same package, always co-installed |
-| `numfmt`, `stat` | coreutils | Always present on Arch |
-| CRF flag syntax | all libx264/libx265 builds | `-crf` is stable across every relevant ffmpeg version; no version guard needed |
+| `-pass`/`-passlogfile`/`-b:v`/`-an`/`-f null` | ffmpeg n9.0.1 (verified), effectively any ffmpeg with libx264/libx265 | These flags predate every supported ffmpeg by years — no version guard needed. The passlogfile *suffix* convention (`-0.log` for both encoders) was verified on n9.0.1; if it ever diverged, the `mktemp -d` + whole-dir cleanup makes it irrelevant |
+| `numfmt --from=iec` | coreutils on Arch | Suffix behavior verified above; strictness handled by pre-validation |
+| `omarchy-menu-input` | shipped in-repo | Same tempfile handshake as menu-select; no new contract |
 
 ## Sources
 
-- ffmpeg-micro.com CRF guide — x264 sane range 18–28, ±6 ≈ half/double, x265 default 28 ≈ x264 23; per-codec landmark CRFs (HIGH confidence, consistent with ffmpeg wiki conventions)
-- video.stackexchange #16664 + Doom9 x265↔x264 CRF mapping — "scales do not correspond; x265 CRF 28 ≈ x264 CRF 23" (HIGH confidence consensus)
-- Gough's Tech Zone x264/x265 CRF curves — measured ~6.05 (x264) / ~5.34 (x265) CRF steps per 2× bitrate (MEDIUM-HIGH, empirical on film content)
-- vibbit.ai / browsercut.com compression guides — real-world CRF 23 file-size ranges, content-variance magnitude (MEDIUM)
-- Repo: `bin/omarchy-transcode` (current flags), `bin/omarchy-menu-select` (subtext/return contract), `shell/plugins/menu/Menu.qml:861-881` (`openDmenu` payload handling, `selectedIndex` init)
+- **Empirical (this environment):** ffmpeg n9.0.1 two-pass runs for libx264 (`-0.log` + `-0.log.mbtree`, 241,236 B out) and libx265 (`-0.log` + `-0.log.cutree`, 231,229 B out) against a generated 3 s test clip; gif `-b:v` invariance (263,031 B at 100k vs 5000k); `numfmt --from=iec` accept/reject table; `ffmpeg -h encoder=libx264` showing `-fastfirstpass` default true and `-passlogfile`.
+- **Repo:** `bin/omarchy-transcode` (helpers at :162/:172/:229, `select_quality` at :247, arg loop at :305), `bin/omarchy-menu-input` (complete input-mode wrapper), `bin/omarchy-menu-select` (select-only payload, :89), `shell/plugins/menu/Menu.qml` (input routing :27, openDmenu :864-885, input submit :765-767/:1160, prompt-as-placeholder :1210-1212), `shell/Commons/Util.qml:111-126` (edit keys), `docs/menu.md` "Select and input modes", `test/shell.d/transcode-quality-test.sh` (argv-stub pattern), v1.1 `.planning/research/STACK.md` (which pre-identified two-pass as "documented future work" with the correct `-an` + null-muxer shape).
 
 ---
-*Stack research for: omarchy-transcode quality tiers + size estimation*
-*Researched: 2026-09-15*
+*Stack research for: omarchy-transcode `--target <size>` two-pass encoding + Custom size menu input*
+*Researched: 2026-09-16*
