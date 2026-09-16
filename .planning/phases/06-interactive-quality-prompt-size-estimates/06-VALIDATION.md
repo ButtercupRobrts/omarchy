@@ -3,9 +3,9 @@ phase: "06"
 slug: "interactive-quality-prompt-size-estimates"
 # status lifecycle: draft (seeded by plan-phase) → validated (set by validate-phase §6)
 # audit-milestone §5.5 distinguishes NOT-VALIDATED (draft) from PARTIAL (validated + nyquist_compliant: false) (#2117)
-status: draft
-nyquist_compliant: false
-wave_0_complete: false
+status: validated
+nyquist_compliant: true
+wave_0_complete: true
 created: "2026-09-15"
 ---
 
@@ -40,11 +40,11 @@ created: "2026-09-15"
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 06-01-01 | 01 | 1 | QUAL-01 | T-06-02, T-06-03 | menu pick stripped at first tab + re-validated `high\|medium\|low` inside `select_quality` before the notification boundary; Esc propagates exit 1 silently | e2e (stub) | `bash test/shell.d/transcode-quality-test.sh` | ✅ | ⬜ pending |
-| 06-01-01 | 01 | 1 | SIZE-01 | T-06-01 | ffprobe output regex-gated `^[0-9.]+$`/`^[0-9]+$` before `awk -v`; `~N MB` at 1–2 sig figs; no probe on the 4-positional path | e2e (stub) | `bash test/shell.d/transcode-quality-test.sh` | ✅ | ⬜ pending |
-| 06-01-02 | 01 | 1 | QUAL-01 | T-06-02 | foreign-label pick rejected pre-notification; gif fps subtexts with zero-ffprobe pin; picture path never prompts | e2e (stub) | `bash test/shell.d/transcode-quality-test.sh` | ✅ | ⬜ pending |
-| 06-01-02 | 01 | 1 | SIZE-01 | T-06-01, T-06-03 | per-row `larger than source` degrade; `N/A` + hard-fail → all-qualitative fallback (no abort); `FAKE_AUDIO=no` drops the 192k term | e2e (stub) | `bash test/shell.d/transcode-quality-test.sh` | ✅ | ⬜ pending |
-| 06-01-03 | 01 | 1 | QUAL-01, SIZE-01 | — | usage() names the quality step; suite sweep green modulo the 7 known environmental failures | suite | `./test/shell` + `./test/cli` | ✅ | ⬜ pending |
+| 06-01-01 | 01 | 1 | QUAL-01 | T-06-02, T-06-03 | menu pick stripped at first tab + re-validated `high\|medium\|low` inside `select_quality` before the notification boundary; Esc propagates exit 1 silently | e2e (stub) | `bash test/shell.d/transcode-quality-test.sh` | ✅ | ✅ green |
+| 06-01-01 | 01 | 1 | SIZE-01 | T-06-01 | ffprobe output regex-gated `^[0-9.]+$`/`^[0-9]+$` before `awk -v`; `~N MB` at 1–2 sig figs; no probe on the 4-positional path | e2e (stub) | `bash test/shell.d/transcode-quality-test.sh` | ✅ | ✅ green |
+| 06-01-02 | 01 | 1 | QUAL-01 | T-06-02 | foreign-label pick rejected pre-notification; gif fps subtexts with zero-ffprobe pin; picture path never prompts | e2e (stub) | `bash test/shell.d/transcode-quality-test.sh` | ✅ | ✅ green |
+| 06-01-02 | 01 | 1 | SIZE-01 | T-06-01, T-06-03 | per-row `larger than source` degrade; `N/A` + hard-fail → all-qualitative fallback (no abort); `FAKE_AUDIO=no` drops the 192k term | e2e (stub) | `bash test/shell.d/transcode-quality-test.sh` | ✅ | ✅ green |
+| 06-01-03 | 01 | 1 | QUAL-01, SIZE-01 | — | usage() names the quality step; suite sweep green modulo the 7 known environmental failures | suite | `./test/shell` + `./test/cli` | ✅ | ✅ green |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 *Harness upgrade (dual-mode menu-select stub, arg-dispatched ffprobe stub, `truncate -s` fixtures) lands with task 06-01-01.*
@@ -71,11 +71,17 @@ created: "2026-09-15"
 
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verify or Wave 0 dependencies
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers all MISSING references
-- [ ] No watch-mode flags
-- [ ] Feedback latency < 15s
-- [ ] `nyquist_compliant: true` set in frontmatter
+- [x] All tasks have `<automated>` verify or Wave 0 dependencies
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify
+- [x] Wave 0 covers all MISSING references
+- [x] No watch-mode flags
+- [x] Feedback latency < 15s
+- [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** pending
+**Approval:** validated 2026-09-16 — `transcode-quality-test.sh` 44/44 green; UAT 4/4 passed.
+
+### Acknowledged advisories (non-blocking)
+
+- Sub-10 MiB estimate band has no pinned row (720p low/medium short clips); related to REVIEW WR-01 — `printf "~%d MB"` floors 2-sig-fig rounding there (`1.9 MiB` → `~1 MB`). Conservative direction, inside the ±2× envelope; fix decision pending.
+- No 4k/720p estimate pins — midpoint table arithmetic is pinned at 1080p and shared across resolutions (INFO).
+- Manual-only rows all covered by 06-UAT.md (4/4 pass).
