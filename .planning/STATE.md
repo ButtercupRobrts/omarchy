@@ -1,17 +1,17 @@
 ---
 gsd_state_version: "1.0"
 milestone: v1.1
-current_phase: 06
-current_phase_name: Interactive quality prompt + size estimates
-status: verifying
-stopped_at: Completed 06-01-PLAN.md
-last_updated: "2026-09-15T22:23:55.379Z"
-last_activity: 2026-09-15
-last_activity_desc: Phase 06 execution started
-state_head: 11083223f766d70be1828028249a0badabd5e5b9
+current_phase: 7
+current_phase_name: Completion-size notification + docs
+status: planning
+stopped_at: Phase 06 complete, ready to plan Phase 7
+last_updated: "2026-09-16T11:38:41.010Z"
+last_activity: 2026-09-16
+last_activity_desc: Phase 06 complete, transitioned to Phase 7
+state_head: f7a5fa82eb2197640167a50ea839d4a67f89e68e
 progress:
   total_phases: 4
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 3
   completed_plans: 3
 milestone_name: Transcode Quality & Size Feedback
@@ -21,23 +21,23 @@ milestone_name: Transcode Quality & Size Feedback
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-09-14)
+See: .planning/PROJECT.md (updated 2026-09-16)
 
-**Core value:** A monitor scale change made from the bar or CLI must apply to the intended monitor and still be in effect after reboot.
-**Current focus:** Phase 06 — Interactive quality prompt + size estimates
+**Core value:** A transcode invoked for sharing should let the user trade quality for size knowingly — pick a quality tier, see roughly how big the result will be, and get the actual size when it finishes — without slowing down the default path.
+**Current focus:** Phase 7 — Completion-size notification + docs
 
 ## Current Position
 
-Phase: 06 (Interactive quality prompt + size estimates) — EXECUTING
-Plan: 1 of 1
-Status: Phase complete — ready for verification
-Last activity: 2026-09-15 — Phase 06 execution started
+Phase: 7 — Completion-size notification + docs
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-09-16 — Phase 06 complete, transitioned to Phase 7
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 2
+- Total plans completed: 3
 - Average duration: 24 min
 - Total execution time: 0.8 hours
 
@@ -47,6 +47,7 @@ Last activity: 2026-09-15 — Phase 06 execution started
 |-------|-------|-------|----------|
 | 1 | 1 | 23 min | 23 min |
 | 2 | 1 | 24 min | 24 min |
+| 06 | 1 | - | - |
 
 **Recent Trend:**
 
@@ -98,6 +99,8 @@ None yet.
 - Focused suites green: monitor-scaling (36 cases), monitor-state, monitor-test (42 assertions incl. textual QML pins); `./test/cli` exit 0
 - Running-UI visual verification of own-screen targeting is pending user UAT (checklist in 02-01-SUMMARY.md) — the dev shell loads the packaged /usr/share/omarchy tree, so it was documented, not executed
 - Housekeeping for phase transition: the stale REQUIREMENTS.md Out-of-Scope row ("Panel reads `hyprctl monitors -j` itself") is superseded by D-06
+- ⚠️ [Phase 6] `estimate_label` floors sub-10 MiB estimates (`~1.9 MB` → `~1 MB`) — REVIEW WR-01, conservative direction, fix decision pending (one-char `%d` → `%.0f`)
+- ⚠️ [Phase 6] Subtext says `MB` but math is MiB — resolve terminology in Phase 7 before the completion notification shows real sizes (UI-REVIEW advisory)
 
 ## Deferred Items
 
@@ -109,6 +112,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-15T22:23:44.615Z
-Stopped at: Completed 06-01-PLAN.md
+Last session: 2026-09-16
+Stopped at: Phase 06 complete, ready to plan Phase 7
 Resume file: None

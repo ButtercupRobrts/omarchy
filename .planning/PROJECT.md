@@ -29,15 +29,15 @@ A transcode invoked for sharing should let the user trade quality for size knowi
 - ✓ Shell runs one bar instance per screen (`Variants { model: Quickshell.screens }`) — existing
 - ✓ `SUPER + /` / `SUPER + ALT + /` scaling keybindings exist — existing
 - ✓ REQ-01..05 — v1.0 per-monitor scaling requirements — shipped in phases 1–3 (see REQUIREMENTS.md traceability)
+- ✓ TRANSC-05 — `omarchy-menu-select` `--default-index` pre-highlight — Phase 4
+- ✓ TRANSC-02 — 4th positional `[quality]` arg; `medium`/omitted byte-identical argv — Phase 5
+- ✓ TRANSC-06 — Pictures skip quality; non-default `-high`/`-low` suffix — Phase 5
+- ✓ TRANSC-01 — Interactive `Select quality` step (mp4 CRF tiers, gif fps tiers) — Phase 6
+- ✓ TRANSC-03 — `~N MB` estimate subtexts on mp4 rows (approximate, degrade honestly) — Phase 6
 
 ### Active
 
-- [ ] TRANSC-01 — Video transcode flow offers a quality step (high/medium/low); mp4 maps to CRF tiers, gif to fps tiers
-- [ ] TRANSC-02 — Quality selectable non-interactively as a 4th positional arg; `medium` (and omitted) reproduces current encoder flags exactly
-- [ ] TRANSC-03 — Quality menu rows show estimated output size as subtext (mp4); estimates are clearly approximate
 - [ ] TRANSC-04 — Completion notification reports the actual output file size
-- [ ] TRANSC-05 — `omarchy-menu-select` supports a pre-highlighted default row so `medium` is the Enter-default
-- [ ] TRANSC-06 — Pictures skip the quality step entirely (jpg/png flow unchanged); output filename gains a quality suffix only when non-default
 
 ### Out of Scope
 
@@ -71,6 +71,10 @@ A transcode invoked for sharing should let the user trade quality for size knowi
 | Two-phase split (CLI fix, then panel UI) | Omarchy requires atomic single-concern changes; maps to two clean potential upstream PRs | — Pending |
 | Independent implementation, not building on PR #11414 | ~9 competing unmerged PRs for the same bug; a standalone change is more reviewable | — Pending |
 | Test via plugin clone AND dev link | Hot-reload iteration plus real end-to-end verification | — Pending |
+| `--default-index` as post-`--` menu arg → `defaultIndex` payload field | Reuses menu arg-forwarding; index is initial-only (filter typing resets to row 0) — accepted | Shipped Phase 4 |
+| Locked tier tables: x264 18/23/28, x265 20/24/28, gif 15/10/5 fps; `medium` byte-identical to prior flags | Backward compat is the default path's contract | Shipped Phase 5 |
+| Quality menu wire format `\t<tier>\t<subtext>` + strip-at-first-tab re-validation | Menu contract returns `label⇥subtext`; re-validation keeps foreign labels from reaching ffmpeg | Shipped Phase 6 |
+| Estimate honesty: `CRF N · ~N MB` (1–2 sig figs), `larger than source` when estimate > src, all-qualitative on probe failure | Never show a misleading number; uniform row heights | Shipped Phase 6 |
 
 ## Evolution
 
@@ -90,4 +94,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-09-15 after milestone v1.1 start*
+*Last updated: 2026-09-16 after Phase 6*
