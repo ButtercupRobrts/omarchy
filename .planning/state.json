@@ -1,33 +1,23 @@
 {
   "contract": "1.0.0",
   "flavor": "core",
-  "milestone": "v1.1",
+  "milestone": "v1.2",
   "phases": [
     {
-      "number": "4",
-      "name": "Menu `defaultIndex` plumbing",
-      "status": "complete"
+      "number": "8",
+      "name": "Non-interactive `--target` size targeting",
+      "status": "pending"
     },
     {
-      "number": "5",
-      "name": "Non-interactive quality in `omarchy-transcode`",
-      "status": "complete"
-    },
-    {
-      "number": "6",
-      "name": "Interactive quality prompt + size estimates",
-      "status": "complete"
-    },
-    {
-      "number": "7",
-      "name": "Completion-size notification + docs",
-      "status": "complete"
+      "number": "9",
+      "name": "Interactive `Custom size…` row",
+      "status": "pending"
     }
   ],
   "next": {
-    "command": "/gsd-new-milestone",
-    "label": "Start a new milestone",
-    "reason": "All phases complete — start a new milestone"
+    "command": "/gsd-discuss-phase 8",
+    "label": "Discuss Phase 8 (non-interactive --target)",
+    "reason": "Roadmap created — Phase 8 is the tracer slice"
   },
-  "updated_at": "2026-09-16T15:00:33.446Z"
+  "updated_at": "2026-09-16T18:20:00.000Z"
 }

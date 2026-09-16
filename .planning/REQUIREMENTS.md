@@ -48,18 +48,18 @@ Deferred to a future milestone. Tracked but not in the current roadmap.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SIZE-10 | — | Pending |
-| SIZE-13 | — | Pending |
-| SIZE-14 | — | Pending |
-| SIZE-15 | — | Pending |
-| MENU-02 | — | Pending |
-| SAFE-02 | — | Pending |
+| SIZE-10 | 8 | Pending |
+| SIZE-13 | 8 | Pending |
+| SIZE-14 | 8 | Pending |
+| SIZE-15 | 8 | Pending |
+| MENU-02 | 9 | Pending |
+| SAFE-02 | 8 | Pending |
 
 **Coverage:**
 
 - v1.2 requirements: 6 total
-- Mapped to phases: 0
-- Unmapped: 6 (roadmap pending)
+- Mapped to phases: 6
+- Unmapped: 0
 
 ### Previous Milestones
 
@@ -68,4 +68,4 @@ v1.1 "Transcode Quality & Size Feedback" — phases 4–7, all requirements Comp
 
 ---
 *Requirements defined: 2026-09-16*
-*Last updated: 2026-09-16 after milestone v1.2 definition*
+*Last updated: 2026-09-16 after milestone v1.2 roadmap*
