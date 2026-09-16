@@ -1,23 +1,16 @@
-# Omarchy Fork — Per-Monitor Display Scaling
+# Omarchy Fork
 
 ## What This Is
 
-A personal fork of Omarchy (`omacom/omarchy` → `ButtercupRobrts/omarchy`) used for developing fixes against the live system and potentially upstreaming them. Current focus: transcode quality selection and size feedback in `omarchy-transcode`. Previously: per-monitor display scaling (v1.0, shipped — phases 1–3).
+A personal fork of Omarchy (`omacom/omarchy` → `ButtercupRobrts/omarchy`) used for developing fixes against the live system and potentially upstreaming them. Shipped: per-monitor display scaling (v1.0, phases 1–3) and transcode quality selection + size feedback in `omarchy-transcode` (v1.1, phases 4–7).
 
-## Core Value
+## Current State
 
-A transcode invoked for sharing should let the user trade quality for size knowingly — pick a quality tier, see roughly how big the result will be, and get the actual size when it finishes — without slowing down the default path.
+**v1.1 shipped 2026-09-16** — `omarchy-transcode` now offers high/medium/low quality tiers (mp4 CRF, gif fps) interactively with `~N MB` estimates and as a 4th positional arg, and the completion notification reports the actual output size. `medium` preserves prior encoder flags byte-for-byte; pictures are unchanged. Milestone audit: 7/7 requirements, `.planning/v1.1-MILESTONE-AUDIT.md`.
 
-## Current Milestone: v1.1 Transcode Quality & Size Feedback
+## Next Milestone Goals
 
-**Goal:** Let users pick output quality and see estimated file size when transcoding, without adding friction to the default path.
-
-**Target features:**
-- Video quality selection (mp4 CRF tiers, gif fps tiers) as a new menu step + 4th positional CLI arg; `medium` preserves today's exact flags
-- Estimated size as subtext on quality menu rows (ffprobe duration × bitrate table)
-- Actual output size in the completion notification
-- `defaultIndex` support in `omarchy-menu-select`/`Menu.qml` so `medium` is pre-highlighted
-- Filename suffix only for non-default quality
+Candidates tracked in `.planning/milestones/v1.1-REQUIREMENTS.md`: `--target <size>` two-pass encode (SIZE-10), intent presets (SIZE-11), gif estimates (SIZE-12), picture quality arg (QUAL-10), Nautilus batch-answer memory (QUAL-11). Upstreaming the v1.1 change set is also open — see branch `ocr-notification-click`.
 
 ## Requirements
 
@@ -34,10 +27,7 @@ A transcode invoked for sharing should let the user trade quality for size knowi
 - ✓ TRANSC-06 — Pictures skip quality; non-default `-high`/`-low` suffix — Phase 5
 - ✓ TRANSC-01 — Interactive `Select quality` step (mp4 CRF tiers, gif fps tiers) — Phase 6
 - ✓ TRANSC-03 — `~N MB` estimate subtexts on mp4 rows (approximate, degrade honestly) — Phase 6
-
-### Active
-
-- [ ] TRANSC-04 — Completion notification reports the actual output file size
+- ✓ TRANSC-04 — Completion notification reports the actual output file size — Phase 7
 
 ### Out of Scope
 
@@ -75,6 +65,9 @@ A transcode invoked for sharing should let the user trade quality for size knowi
 | Locked tier tables: x264 18/23/28, x265 20/24/28, gif 15/10/5 fps; `medium` byte-identical to prior flags | Backward compat is the default path's contract | Shipped Phase 5 |
 | Quality menu wire format `\t<tier>\t<subtext>` + strip-at-first-tab re-validation | Menu contract returns `label⇥subtext`; re-validation keeps foreign labels from reaching ffmpeg | Shipped Phase 6 |
 | Estimate honesty: `CRF N · ~N MB` (1–2 sig figs), `larger than source` when estimate > src, all-qualitative on probe failure | Never show a misleading number; uniform row heights | Shipped Phase 6 |
+| Actual size in done notification, MiB arithmetic labeled `MB`, `<1 MB` band, stat-failure degrades to plain body | Closes the estimate→actual calibration loop; never fabricates a size | Shipped Phase 7 |
+| Format/resolution validation hoisted into `main()` ahead of menus and the start notification | Orphan `Transcoding video…` toast on bad positionals removed at milestone close | Shipped v1.1 close |
+| Non-finite `--width`/`--maxheight` guarded like `defaultIndex` | `Inf`/`NaN` JSON tokens discarded the payload → menu hang | Shipped v1.1 close |
 
 ## Evolution
 
@@ -94,4 +87,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-09-16 after Phase 6*
+*Last updated: 2026-09-16 after milestone v1.1 close*
