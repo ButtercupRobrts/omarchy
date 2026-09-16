@@ -40,7 +40,9 @@ created: "2026-09-16"
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 08-01-01 | 01 | 1 | SIZE-10, SIZE-13, SIZE-14, SIZE-15, SAFE-02 | T-8-01 / — | `--target` parses free-text sizes to integer bytes; refuses bad input, gif/picture/quality-conflict, sub-floor budgets, and probe failure on stderr before any menu or notification; no `-nan`/zero/negative `-b:v` ever reaches ffmpeg argv | integration (stub harness) | `bash test/shell.d/transcode-quality-test.sh` | ✅ | ⬜ pending |
+| 08-01-01 | 01 | 1 | SIZE-10, SIZE-13, SAFE-02 | T-8-01 / — | `--target` parses free-text sizes to integer bytes; parser rejects on stderr before any menu or notification | integration (stub harness) | `bash test/shell.d/transcode-quality-test.sh` | ✅ | ⬜ pending |
+| 08-01-02 | 01 | 1 | SIZE-13, SIZE-14, SAFE-02 | T-8-02 / — | Refusal matrix fires pre-notification; no negative, zero, or `-nan` `-b:v` ever reaches ffmpeg argv | integration (stub harness) | `bash test/shell.d/transcode-quality-test.sh` | ✅ | ⬜ pending |
+| 08-01-03 | 01 | 1 | SIZE-10, SIZE-15 | T-8-03 / — | Exactly one overshoot retry with tightened budget; passlogs cleaned on every exit path | integration (stub harness) | `bash test/shell.d/transcode-quality-test.sh` + `./test/shell` + `./test/cli` | ✅ | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 

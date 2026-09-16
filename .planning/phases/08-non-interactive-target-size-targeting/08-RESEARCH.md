@@ -110,7 +110,7 @@ else
   ...
 ```
 
-- **`-p`/`--print-id` exists and prints the bare id** — `bin/omarchy-notification-send:205-208` (`${out##* }` strips busctl's `u ` prefix). `-r <id>` replaces in place (`:65-71`, `:196-203`). This is the whole pass-scoped-notification mechanism (D-08): start toast carries "pass 1/2"; `transcode_video_target` issues `-r "$notify_id"` with "pass 2/2" when pass 2 begins. Guard the replace call with `[[ $notify_id =~ ^[0-9]+$ ]]` inside an `if` (see §4 footgun list — `[[ … ]] && cmd` as a statement aborts under `set -e` when the test fails).
+- **`-p`/`--print-id` exists and prints the bare id** — `bin/omarchy-notification-send:205-208` (`${out##* }` strips busctl's `u ` prefix). `-r <id>` replaces in place (`:65-71`, `:196-203`). This is the whole pass-scoped-notification mechanism (D-08): start toast carries "pass 1/2"; `transcode_video_target` issues `-r "$notify_id"` with "pass 2/2" when pass 2 begins. Guard the replace call with `[[ $notify_id =~ ^[0-9]+$ ]]` inside an `if` (see §4 footgun list — `[[ … ]] && cmd` as a statement is silently inert when the test fails: a failing non-final `&&` member is errexit-exempt, so the guard *works*, but `if` states the intent plainly and survives a later `&&`-append flipping which failure is fatal).
 - The done toast names `$resolution` = effective rung automatically, and `output_size_label` reports the post-retry actual size — SIZE-02 becomes the hit/miss report for free. Disclosure of step-down in the done toast is optional (the start toast carries it; `requested_resolution` remains in scope if the implementer wants symmetry).
 - A failed pass 1 under `set -e` dies before the done toast — identical to today's single-pass failure posture; the orphan start toast is existing accepted behavior.
 
@@ -277,13 +277,13 @@ fi
 
 - **Trigger is any byte-over** (D-01): `actual > target_bytes`, no tolerance band.
 - **Tightened budget** (D-02): `video_kbps₂ = video_kbps₁ × target_bytes ÷ actual_bytes` — scale the one controllable term; resolution and 192k audio stay fixed (re-planning could silently move resolution after filename/toasts committed).
-- **Retry is pass-2-only**, reusing the existing passlog — that's why cleanup waits. It writes into `$passdir` (unique → no pre-existing-file prompt → no `-y` needed anywhere; partials auto-clean via the trap) and `mv`s onto `$output` only on success (D-03). A failed retry is swallowed deliberately — the overshot-but-playable first output remains for the done notification to report honestly. Wrap the retry ffmpeg in `if …; then mv; fi`: a bare `cmd && cmd` statement aborts under `set -e` and would kill the run instead of degrading.
+- **Retry is pass-2-only**, reusing the existing passlog — that's why cleanup waits. It writes into `$passdir` (unique → no pre-existing-file prompt → no `-y` needed anywhere; partials auto-clean via the trap) and `mv`s onto `$output` only on success (D-03). A failed retry is swallowed deliberately — the overshot-but-playable first output remains for the done notification to report honestly. Wrap the retry ffmpeg in `if …; then mv; fi`: the swallow is deliberate, so make it explicit — a bare `ffmpeg && mv` would also survive the ffmpeg failure (non-final `&&` members are errexit-exempt), but it reads as if failure should stop the run and leaves `mv`'s own failure folded into the same ambiguous chain.
 - **Exactly one retry** — no loop (SIZE-17 deferred). If still over, the done toast reports actual either way.
 - Worked example: first output 27,000,000 B vs target 26,214,400 → `retry_kbps = 3233 × 26214400/27000000 = 3138`.
 
 **`set -e` footgun checklist for the new code:**
 
-- `[[ cond ]] && cmd` as a *statement* returns 1 when `cond` fails → aborts (e.g. the `notify_id` regex guard — use `if`).
+- `cmd1 && cmd2` as a *statement*: a failing **non-final** member is errexit-exempt (the list is silently inert — exactly why `(( video_kbps >= floor )) && break` is safe), but a failing **final** member aborts the run. Prefer `if` wherever a guard controls an optional action (the `notify_id` regex guard, the retry `mv`) so intent is explicit and a later `&&`-append can't flip which failure is fatal.
 - `(( expr ))` returns 1 when the expression evaluates to 0 → never use `(( video_kbps > 0 ))` on a computed value without structure around it; `(( a > b ))` inside `if`/loop conditions is safe.
 - Duration is a float — `(( duration > 0 ))` is a *syntax error* on `60.033`; gate inside awk (`d <= 0 → exit 1`).
 - `local x=$(cmd)` masks `cmd`'s status — all captures on their own lines.
