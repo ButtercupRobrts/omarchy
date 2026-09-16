@@ -15,9 +15,9 @@
     }
   ],
   "next": {
-    "command": "/gsd-discuss-phase 8",
-    "label": "Discuss Phase 8 (non-interactive --target)",
-    "reason": "Roadmap created — Phase 8 is the tracer slice"
+    "command": "/gsd-progress --next",
+    "label": "Advance to the next step",
+    "reason": "Phase 08 of 2 · executing"
   },
-  "updated_at": "2026-09-16T18:20:00.000Z"
+  "updated_at": "2026-09-16T23:32:10.849Z"
 }
