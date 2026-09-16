@@ -16,7 +16,7 @@ Requirements for this milestone. Each maps to roadmap phases.
 ### Size Feedback
 
 - [x] **SIZE-01**: mp4 quality menu rows show a `~N MB` estimate as subtext (ffprobe duration × per-resolution/tier bitrate table + fixed 192k audio); gif rows show fps instead of a size estimate
-- [ ] **SIZE-02**: The completion notification reports the actual output file size
+- [x] **SIZE-02**: The completion notification reports the actual output file size
 
 ### Menu Infrastructure
 
@@ -59,7 +59,7 @@ Deferred to a future milestone. Tracked but not in the current roadmap.
 | SAFE-01 | Phase 5 | Complete |
 | QUAL-01 | Phase 6 | Complete |
 | SIZE-01 | Phase 6 | Complete |
-| SIZE-02 | Phase 7 | Pending |
+| SIZE-02 | Phase 7 | Complete |
 
 **Coverage:**
 

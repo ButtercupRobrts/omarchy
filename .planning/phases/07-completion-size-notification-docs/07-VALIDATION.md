@@ -2,8 +2,8 @@
 phase: "7"
 slug: "completion-size-notification-docs"
 # status lifecycle: draft (seeded by plan-phase) → validated (set by validate-phase §6)
-status: draft
-nyquist_compliant: false
+status: validated
+nyquist_compliant: true
 wave_0_complete: false
 created: "2026-09-16"
 ---
@@ -39,12 +39,15 @@ created: "2026-09-16"
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| TBD (T-07-size-video) | TBD | TBD | SIZE-02 | T-07-stat | video done-notification body carries real output size (`38 MB`); `stat` output regex-gated `^[0-9]+$` before `awk -v` | e2e (stub) | `bash test/shell.d/transcode-quality-test.sh` | ✅ (extend) | ⬜ pending |
-| TBD (T-07-size-picture / -gif) | TBD | TBD | SIZE-02 | T-07-stat | picture and gif arms carry the size via the same code path | e2e (stub) | `bash test/shell.d/transcode-quality-test.sh` | ✅ (extend) | ⬜ pending |
-| TBD (T-07-degrade) | TBD | TBD | SIZE-02 | T-07-stat, T-07-fail | stat failure / missing output degrades to plain body — never lies, never aborts under `set -euo pipefail` | e2e (stub) | `bash test/shell.d/transcode-quality-test.sh` | ✅ (extend) | ⬜ pending |
-| TBD (T-07-failure) | TBD | TBD | SIZE-02 | T-07-fail | encode failure → zero `Transcoded` notification lines (`FAKE_ENCODE_RC` knob) | e2e (stub) | `bash test/shell.d/transcode-quality-test.sh` | ✅ (extend) | ⬜ pending |
-| TBD (T-07-dedupe-size) | TBD | TBD | SIZE-02 | — | deduped `-2` output path still reports its own size | e2e (stub) | `bash test/shell.d/transcode-quality-test.sh` | ✅ (extend) | ⬜ pending |
-| TBD (T-07-docs) | TBD | TBD | ROADMAP SC2 | — | `usage()`/`# omarchy:*`/`docs/`/`manual/` consistent with shipped behavior; `manual/12-screenshots-recording.md:70` gains quality step + size sentence | suite + review | `./test/cli` | ✅ | ⬜ pending |
+| 07-01-01 (T-07-size-video) | 01 | 1 | SIZE-02 | T-07-01 | video done-notification body carries real output size (`38 MB`); `stat` output regex-gated `^[0-9]+$` before `awk -v` | e2e (stub) | `bash test/shell.d/transcode-quality-test.sh` | ✅ | ✅ green |
+| 07-01-01 (T-07-size-picture) | 01 | 1 | SIZE-02 | T-07-01 | picture arm carries the size via the same code path | e2e (stub) | `bash test/shell.d/transcode-quality-test.sh` | ✅ | ✅ green |
+| 07-01-02 (T-07-size-gif) | 01 | 1 | SIZE-02 | T-07-01 | gif arm carries the size via the same code path | e2e (stub) | `bash test/shell.d/transcode-quality-test.sh` | ✅ | ✅ green |
+| 07-01-01 (T-07-degrade) | 01 | 1 | SIZE-02 | T-07-01, T-07-02 | stat failure / missing output degrades to plain body — never lies, never aborts under `set -euo pipefail` | e2e (stub) | `bash test/shell.d/transcode-quality-test.sh` | ✅ | ✅ green |
+| 07-01-01 (T-07-failure) | 01 | 1 | SIZE-02 | T-07-02 | encode failure → zero `Transcoded` notification lines (`FAKE_ENCODE_RC` knob) | e2e (stub) | `bash test/shell.d/transcode-quality-test.sh` | ✅ | ✅ green |
+| 07-01-02 (T-07-dedupe-size) | 01 | 1 | SIZE-02 | — | deduped `-2` output path still reports its own size | e2e (stub) | `bash test/shell.d/transcode-quality-test.sh` | ✅ | ✅ green |
+| 07-01-02 (T-07-docs) | 01 | 1 | ROADMAP SC2 | — | `usage()`/`# omarchy:*`/`docs/`/`manual/` consistent with shipped behavior; `manual/12:70,:72` updated | suite + review | `./test/cli` | ✅ | ✅ green |
+| 07-01-03 (T-07-wr01) | 01 | 1 | SIZE-01 (fix) | — | sub-10 MiB estimates round, not floor (`~6/~4/~2` pin) | e2e (stub) | `bash test/shell.d/transcode-quality-test.sh` | ✅ | ✅ green |
+| post-review fix (`972a1bba`) | — | — | SIZE-02 | T-07-01 | sub-1 MiB outputs report `<1 MB`, never `0 MB` (REVIEW WR-01) | e2e (stub) | `bash test/shell.d/transcode-quality-test.sh` | ✅ | ✅ green |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 *Harness extension: `FAKE_OUT_BYTES` (encoder stub `truncate -s` the out path) + `FAKE_ENCODE_RC` knobs land with the first task, not as prerequisites. If the WR-01 advisory (`estimate_label` `%d`→`%.0f`) folds into this phase, add a `T-07-wr01` sub-10 MiB rounding pin.*
@@ -71,11 +74,11 @@ created: "2026-09-16"
 
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verify or Wave 0 dependencies
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers all MISSING references
-- [ ] No watch-mode flags
-- [ ] Feedback latency < 15s
-- [ ] `nyquist_compliant: true` set in frontmatter
+- [x] All tasks have `<automated>` verify or Wave 0 dependencies
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify
+- [x] Wave 0 covers all MISSING references (none — existing harness extended in place)
+- [x] No watch-mode flags
+- [x] Feedback latency < 15s (~5s focused suite)
+- [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** pending
+**Approval:** approved 2026-09-16 — all rows green (52/52 focused assertions), 3 manual-only items passed in UAT (07-UAT.md), security audit clear (07-SECURITY.md)
