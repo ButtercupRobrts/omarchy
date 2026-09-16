@@ -15,7 +15,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 4: Menu `defaultIndex` plumbing** - `omarchy-menu-select` accepts `--default-index N` (post-`--` menu arg) → `defaultIndex` in the JSON payload → `Menu.qml` `openDmenu` pre-highlights that row
 - [x] **Phase 5: Non-interactive quality in `omarchy-transcode`** - Optional 4th positional arg with validation, locked CRF/fps tier tables, non-default quality filename suffix, deliberate output-collision policy
-- [ ] **Phase 6: Interactive quality prompt + size estimates** - Quality menu step after format+resolution for video, `~N MB` subtexts for mp4, fps subtexts for gif, `medium` pre-highlighted via Phase 4 plumbing
+- [x] **Phase 6: Interactive quality prompt + size estimates** - Quality menu step after format+resolution for video, `~N MB` subtexts for mp4, fps subtexts for gif, `medium` pre-highlighted via Phase 4 plumbing (completed 2026-09-16)
 - [ ] **Phase 7: Completion-size notification + docs** - Actual output size appended to the done notification; usage/metadata/manual sync
 
 ## Phase Details
@@ -114,5 +114,5 @@ Phases execute in numeric order: 4 → 5 → 6 → 7 (4 and 5 are independent; 6
 |-------|----------------|--------|-----------|
 | 4. Menu `defaultIndex` plumbing | 1/1 | Complete | 2026-09-15 |
 | 5. Non-interactive quality in `omarchy-transcode` | 1/1 | Complete | 2026-09-15 |
-| 6. Interactive quality prompt + size estimates | 1/1 | In Progress|  |
+| 6. Interactive quality prompt + size estimates | 1/1 | Complete    | 2026-09-16 |
 | 7. Completion-size notification + docs | 0/0 | Pending |  |

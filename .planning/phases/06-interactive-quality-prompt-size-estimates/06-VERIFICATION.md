@@ -1,9 +1,10 @@
 ---
 phase: 06-interactive-quality-prompt-size-estimates
 verified: 2026-09-15T22:56:52Z
-status: human_needed
+status: passed
 score: 10/10 must-haves verified
 covered_files:
+
   - .planning/REQUIREMENTS.md
   - .planning/phases/06-interactive-quality-prompt-size-estimates/06-01-PLAN.md
   - .planning/phases/06-interactive-quality-prompt-size-estimates/06-01-SUMMARY.md
@@ -12,10 +13,12 @@ covered_files:
   - bin/omarchy-transcode
   - test/shell.d/menu-select-test.sh
   - test/shell.d/transcode-quality-test.sh
+
 covered_digest: "v1:sha256:158427fbf35928695c84cf5cfd9fb5c2e7258f5a583950ba368047270100742f"
 behavior_unverified: 0
 overrides_applied: 0
 human_verification:
+
   - test: "Open the quality menu in the running UI (`omarchy transcode <clip> mp4 1080p` after `omarchy-restart-shell`, or `wtype -k Return` to accept the default)"
     expected: "Cursor sits on `medium`; the three rows show `CRF N · ~N MB` subtexts un-elided at ~300px card width with uniform `detailRowHeight`; Enter picks medium"
     why_human: "Rendered pre-highlight, elision, and row heights are running-shell properties per agents/skills/visual-verification.md; the dev shell loads the packaged /usr/share/omarchy tree, and the stub harness proves argv, not pixels (VALIDATION.md Manual-Only table; SUMMARY UAT item a)"
