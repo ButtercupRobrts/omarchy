@@ -45,9 +45,9 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 **Canonical refs:** `.planning/research/ARCHITECTURE.md` (integration map, step-down ordering, additive-diff rules), `.planning/research/PITFALLS.md` (pitfalls 1–7, 9–11), `.planning/research/STACK.md` (verified two-pass/numfmt mechanics), `.planning/research/FEATURES.md` (budget math, floor grounding), `bin/omarchy-transcode`, `test/shell.d/transcode-quality-test.sh`
 
-**Plans**: 1 plan (anticipated)
+**Plans**: 1 plan
 
-- [ ] 08-01: `--target` flag arm + `parse_target_size` + refusal matrix + `plan_target`/floor table + `transcode_video_target` two-pass sibling (`mktemp -d` passlog + trap) + `resolution`-overwrite wiring before `output_path` + overshoot retry + pass-aware stub harness — one atomic commit (the flag without the encoder is dead code; the parser without the flag is unreachable)
+- [ ] 08-01-PLAN.md — `--target` flag arm + `parse_target_size` + refusal matrix + `plan_target`/floor table + `transcode_video_target` two-pass sibling (`mktemp -d` passlog + trap) + `resolution`-overwrite wiring before `output_path` + overshoot retry + pass-aware stub harness — one atomic commit (the flag without the encoder is dead code; the parser without the flag is unreachable)
 
 ### Phase 9: Interactive `Custom size…` row
 
