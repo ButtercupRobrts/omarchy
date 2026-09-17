@@ -247,7 +247,7 @@ estimate_label() {
 # never reaching output_path or ffmpeg.
 select_quality() {
   local input="$1" format="$2" resolution="$3"
-  local duration="" src_bytes="" audio_kbps=192 tier subtext selection
+  local duration="" src_bytes="" audio_kbps=192 tier subtext selection custom_label="Custom size…" custom_subtext="Enter a size like 25M" bytes
   local rows=()
 
   if [[ $format == "mp4" ]]; then
@@ -274,9 +274,20 @@ select_quality() {
     rows+=($'\t'"$tier"$'\t'"$subtext")
   done
 
+  # mp4 only: the sentinel row's label doubles as its key -- the menu returns
+  # "label\tsubtext", and the strip below hands the label back verbatim.
+  [[ $format == "mp4" ]] && rows+=($'\t'"$custom_label"$'\t'"$custom_subtext")
+
   selection=$(omarchy-menu-select "Select quality" "${rows[@]}" -- --default-index 1) || return
 
   selection="${selection%%$'\t'*}"
+
+  if [[ $selection == "$custom_label" ]]; then
+    bytes=$(prompt_target_size) || return
+    printf 'target:%s' "$bytes"
+    return
+  fi
+
   case "$selection" in
   high | medium | low) ;;
   *)
@@ -323,6 +334,25 @@ parse_target_size() {
   printf '%s' "$bytes"
 }
 
+# Prompts for a free-text target size behind the Custom size… row. Re-prompts
+# exactly once -- the second prompt carries an error hint so it reads as
+# "invalid", not "didn't take" (D-02) -- then cancels. Esc cancels at either
+# prompt like every sibling. Empty submits ride through parse_target_size with
+# everything else: one validator for both entry points. Planner refusals are
+# NOT this loop's business (D-01).
+prompt_target_size() {
+  local prompt="Target size (e.g. 25M)" answer bytes attempt
+  for attempt in 1 2; do
+    answer=$(omarchy-menu-input "$prompt") || return 1
+    if bytes=$(parse_target_size "$answer"); then
+      printf '%s' "$bytes"
+      return 0
+    fi
+    prompt="Invalid size — e.g. 25M"
+  done
+  return 1
+}
+
 # Plans a --target run: refuses a target at or above the source size (a
 # re-encode can only degrade it -- drop --target and pick a quality for format
 # conversion), probes duration and audio, derives the video bitrate
@@ -365,6 +395,7 @@ plan_target() {
     4k) floor=2000 ;;
     1080p) floor=800 ;;
     720p) floor=400 ;;
+    *) echo "Invalid video resolution: $res" >&2; return 1 ;;
     esac
     (( video_kbps >= floor )) && break
     case "$res" in
@@ -601,6 +632,16 @@ main() {
 
   if [[ $type == "video" && -z $quality && -z $target_bytes ]]; then
     quality=$(select_quality "$input" "$format" "$resolution")
+    # A Custom size… pick returns target:<bytes> -- unwrap into the same two
+    # variables --target sets, so the planner block, output_path, and the
+    # dispatch below are byte-identical to a CLI run (D-00f).
+    if [[ $quality == target:* ]]; then
+      target_bytes="${quality#target:}"
+      [[ $target_bytes =~ ^[0-9]+$ ]] ||
+        { echo "Invalid target size: $target_bytes" >&2; return 1; }
+      target_token=$(numfmt --to=iec "$target_bytes")
+      quality=""
+    fi
   fi
 
   # Under --target the planner runs after every menu and before the output
