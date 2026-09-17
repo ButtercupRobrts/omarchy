@@ -2,9 +2,9 @@
 phase: "09"
 slug: "interactive-custom-size-row"
 # status lifecycle: draft (seeded by plan-phase) → validated (set by validate-phase §6)
-status: draft
-nyquist_compliant: false
-wave_0_complete: false
+status: validated
+nyquist_compliant: true
+wave_0_complete: true
 created: "2026-09-17"
 ---
 
@@ -37,7 +37,9 @@ created: "2026-09-17"
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 09-01-01 | 01 | 1 | MENU-02 | T-9-0x | Sentinel row + `prompt_target_size` + `target:` unwrap + input stub + parity rows — one atomic commit | e2e (stub) | `bash test/shell.d/transcode-quality-test.sh` | ✅ | ⬜ pending |
+| 09-01-01 | 01 | 1 | MENU-02 | T-09-01 | Sentinel row (mp4-gated, appended last, subtext) + sentinel branch (post-strip/pre-case, format-gated per WR-01) + `prompt_target_size` + `target:` unwrap (`quality=""`) + input stub — sentinel never reaches whitelist/argv | e2e (stub) | `bash test/shell.d/transcode-quality-test.sh` | ✅ | ✅ green |
+| 09-01-02 | 01 | 1 | MENU-02 | T-09-01..05 | Re-prompt budget (≤2 input calls, hint on 2nd), all cancel paths pre-notification, floor-refusal parity, forged-gif-sentinel refusal, IN-01 `""` pin | e2e (stub) | `bash test/shell.d/transcode-quality-test.sh` | ✅ | ✅ green (93/93) |
+| 09-01-03 | 01 | 1 | MENU-02 | — | Suite sweep + additive-diff audit + atomic commit; usage/metadata/QML byte-identical | lint+docs | `./test/cli && bash -n bin/omarchy-transcode` | ✅ | ✅ green |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -62,6 +64,6 @@ None — existing harness covers everything; the `omarchy-menu-input` stub lands
 - [x] Every success criterion has an automated proof
 - [x] No watch-mode flags
 - [x] Feedback latency < 30s
-- [ ] `nyquist_compliant: true` set in frontmatter (set by validate-phase audit)
+- [x] `nyquist_compliant: true` set in frontmatter (set by validate-phase audit)
 
-**Approval:** pending
+**Approval:** approved 2026-09-17 — gap analysis 0 gaps; all tasks green via stub e2e
