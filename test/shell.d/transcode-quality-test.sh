@@ -614,6 +614,19 @@ grep -Fx "out=$TMPDIR/in-720p-low.gif" "$calls" >/dev/null ||
   fail "a low gif pick writes in-720p-low.gif" "$(cat "$calls")"
 pass "gif rows carry fps subtexts and never probe the input"
 
+# A forged Custom size… pick on a gif run must die at the whitelist like any
+# other foreign label — never minting target: or firing the input prompt.
+status=0
+FAKE_PICK=$'Custom size…\tEnter a size like 25M' \
+  run_transcode "$TMPDIR/in.mov" gif 720p || status=$?
+[[ $status -ne 0 ]] || fail "a forged Custom pick on gif is refused" "exit=$status"
+grep -F 'Invalid video quality' "$TMPDIR/stderr" >/dev/null ||
+  fail "a forged gif sentinel dies at the whitelist" "$(cat "$TMPDIR/stderr")"
+if grep -q '^menu-input:' "$calls"; then
+  fail "a forged gif sentinel never fires the input prompt" "$(cat "$calls")"
+fi
+pass "a forged Custom pick on gif dies at the whitelist"
+
 # Pictures stop after the resolution prompt: no quality menu, no probe.
 run_transcode "$TMPDIR/img.png" jpg medium
 if grep -q '^menu-select:' "$calls" || grep -q '^ffprobe:' "$calls"; then

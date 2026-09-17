@@ -241,10 +241,11 @@ estimate_label() {
 }
 
 # Builds the quality rows as "\t<tier>\t<subtext>" argv (the leading tab is the
-# empty glyph field), pre-highlights medium, and prints the picked tier. The
-# "label\tsubtext" return is stripped at the first tab and re-validated here so
-# a foreign label dies inside the helper, before the notification boundary --
-# never reaching output_path or ffmpeg.
+# empty glyph field), pre-highlights medium, and prints the picked tier -- or
+# "target:<bytes>" when the mp4-only Custom size… row is picked, which main()
+# unwraps into the --target path. The "label\tsubtext" return is stripped at the
+# first tab and re-validated here so a foreign label dies inside the helper,
+# before the notification boundary -- never reaching output_path or ffmpeg.
 select_quality() {
   local input="$1" format="$2" resolution="$3"
   local duration="" src_bytes="" audio_kbps=192 tier subtext selection custom_label="Custom size…" custom_subtext="Enter a size like 25M" bytes
@@ -282,7 +283,7 @@ select_quality() {
 
   selection="${selection%%$'\t'*}"
 
-  if [[ $selection == "$custom_label" ]]; then
+  if [[ $format == "mp4" && $selection == "$custom_label" ]]; then
     bytes=$(prompt_target_size) || return
     printf 'target:%s' "$bytes"
     return
