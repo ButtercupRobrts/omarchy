@@ -143,6 +143,26 @@ fi
 printf '%s' "$FAKE_PICK"
 SH
 
+# omarchy-menu-input mirrors the real binary's three states: a set FAKE_INPUT
+# prints it and exits 0 (submit); a set-but-empty FAKE_INPUT exits 0 with
+# empty stdout (empty submit -- NOT a cancel, the real binary writes "\n" so
+# -s is true); unset exits 1 (Esc, and the tripwire for runs that must never
+# reach the input prompt). Per-invocation knobs (FAKE_INPUT, FAKE_INPUT2, …)
+# feed the re-prompt loop -- same convention as FAKE_OUT_BYTES/FAKE_OUT_BYTES2,
+# with the invocation number counted off the just-logged menu-input: line
+# exactly like the pass-2 counter above. The log line is written before the
+# decision, so an unexpected call still leaves evidence; %s not %q so literal
+# tabs in argv stay greppable.
+cat >"$STUB_DIR/omarchy-menu-input" <<'SH'
+#!/bin/bash
+printf 'menu-input: %s\n' "$*" >>"$CALLS"
+n=$(grep -c '^menu-input:' "$CALLS")
+var=FAKE_INPUT
+(( n > 1 )) && var="FAKE_INPUT$n"
+[[ -z ${!var+x} ]] && exit 1
+printf '%s' "${!var}"
+SH
+
 # ffprobe dispatches on argv: the audio-presence probe carries
 # `stream=codec_type` glued to `-show_entries`, so ` stream=codec_type ` in
 # " $* " selects that arm -- a bare ` codec_type ` glob never matches the real
@@ -579,6 +599,9 @@ for subtext in '15 fps' '10 fps' '5 fps'; do
   grep -F "$subtext" "$calls" >/dev/null ||
     fail "the gif menu offers a $subtext row" "$(cat "$calls")"
 done
+if grep -F 'Custom' "$calls" >/dev/null; then
+  fail "the gif menu never offers a Custom size row" "$(cat "$calls")"
+fi
 if grep '^menu-select: ' "$calls" | grep -F '~' >/dev/null; then
   fail "gif rows never carry size estimates" "$(cat "$calls")"
 fi
@@ -869,7 +892,7 @@ pass "a target at or above the 4k floor stays at 4k"
 # --- --target: refusal matrix ---------------------------------------------
 # Parse rejects die in the arg loop -- exit 2, the rejected input on stderr,
 # and a provably empty call log (before media_type, any menu, or any toast).
-for bad in abc -5M 0 25.5.2M; do
+for bad in abc -5M 0 25.5.2M ""; do
   status=0
   run_transcode "$TMPDIR/in.mov" mp4 1080p --target "$bad" || status=$?
   [[ $status -eq 2 ]] ||
@@ -1207,6 +1230,185 @@ run_transcode --help
 grep -F -- '--target' "$TMPDIR/stdout" >/dev/null ||
   fail "--help documents --target" "$(cat "$TMPDIR/stdout")"
 pass "--help documents the --target flag"
+
+# --- Custom size… -------------------------------------------------------------
+# The mp4 menu carries a fourth, last row whose label doubles as the sentinel
+# key: the pick returns "Custom size…\t<subtext>", the strip hands the label to
+# the sentinel branch, and the typed answer rides the exact --target path, so
+# the ffmpeg argv and toast text are cmp-identical to `mp4 1080p --target 25M`
+# modulo the per-run mktemp passdir that -passlogfile logs (sed-normalized on
+# both greps). Rows after the first two runs read the saved copies only --
+# run_transcode truncates $calls and rewrites $TMPDIR/stderr on every
+# invocation.
+FAKE_INPUT=25M FAKE_DURATION=60 FAKE_PICK=$'Custom size…\tEnter a size like 25M' \
+  run_transcode "$TMPDIR/in.mov" mp4 1080p
+cp "$calls" "$TMPDIR/calls-custom"
+cp "$TMPDIR/stderr" "$TMPDIR/stderr-custom"
+grep '^menu-select: ' "$TMPDIR/calls-custom" | grep -F 'Select quality' >/dev/null ||
+  fail "a Custom pick records the Select quality menu call" "$(cat "$TMPDIR/calls-custom")"
+grep '^menu-select: ' "$TMPDIR/calls-custom" |
+  grep -F $'\tCustom size…\tEnter a size like 25M -- --default-index 1' >/dev/null ||
+  fail "the Custom size row sits last with its subtext and medium stays pre-highlighted" \
+    "$(cat "$TMPDIR/calls-custom")"
+pass "the mp4 menu offers Custom size… last with a subtext and medium pre-highlighted"
+
+# The CLI twin of the parity pin: --target 25M never prompts and pays only the
+# planner's two probes.
+rm -f "$TMPDIR/in-1080p-25M.mp4"
+FAKE_DURATION=60 run_transcode "$TMPDIR/in.mov" mp4 1080p --target 25M
+grep -E '^(ffmpeg |notification:)' "$calls" |
+  sed 's|transcode-2pass\.[^/ ]*|transcode-2pass.X|' >"$TMPDIR/parity-cli"
+[[ $(grep -c '^ffprobe:' "$calls") -eq 2 ]] ||
+  fail "the --target baseline probes exactly twice" "$(cat "$calls")"
+if grep -q '^menu-select:' "$calls" || grep -q '^menu-input:' "$calls"; then
+  fail "the --target baseline never prompts" "$(cat "$calls")"
+fi
+pass "a --target 25M run never prompts and probes exactly twice"
+
+# The Custom run's encode is byte-identical to the CLI run's -- same two-pass
+# argv, same toast text; only the menu plumbing and the two menu-estimate
+# probes differ upstream of it.
+grep -E '^(ffmpeg |notification:)' "$TMPDIR/calls-custom" |
+  sed 's|transcode-2pass\.[^/ ]*|transcode-2pass.X|' >"$TMPDIR/parity-menu"
+if ! cmp -s "$TMPDIR/parity-cli" "$TMPDIR/parity-menu"; then
+  fail "a Custom size pick produces the --target run's argv and toasts" \
+    "$(diff -u "$TMPDIR/parity-cli" "$TMPDIR/parity-menu")"
+fi
+grep -Fx "out=$TMPDIR/in-1080p-25M.mp4" "$TMPDIR/calls-custom" >/dev/null ||
+  fail "a Custom pick writes the -25M output name" "$(cat "$TMPDIR/calls-custom")"
+[[ $(grep -c '^menu-input:' "$TMPDIR/calls-custom") -eq 1 ]] ||
+  fail "a Custom pick fires the input prompt exactly once" "$(cat "$TMPDIR/calls-custom")"
+grep -Fx 'menu-input: Target size (e.g. 25M)' "$TMPDIR/calls-custom" >/dev/null ||
+  fail "the input prompt carries its locked text" "$(cat "$TMPDIR/calls-custom")"
+[[ $(grep -c '^ffprobe:' "$TMPDIR/calls-custom") -eq 4 ]] ||
+  fail "a Custom run probes 4 times (2 menu estimates + 2 planner)" \
+    "$(cat "$TMPDIR/calls-custom")"
+pass "a Custom size pick encodes byte-identically to --target 25M"
+
+# The sentinel label and the target: mint never reach the encoder, the output
+# name, or the tier case -- the strip-plus-branch stays the only chokepoint.
+if grep -E '^(ffmpeg |out=)' "$TMPDIR/calls-custom" | grep -F 'Custom' >/dev/null; then
+  fail "the Custom label never reaches an ffmpeg or out= line" \
+    "$(cat "$TMPDIR/calls-custom")"
+fi
+if grep -E '^(ffmpeg |out=)' "$TMPDIR/calls-custom" | grep -F 'target:' >/dev/null; then
+  fail "the target: sentinel never reaches an ffmpeg or out= line" \
+    "$(cat "$TMPDIR/calls-custom")"
+fi
+if grep -F 'Invalid video quality' "$TMPDIR/stderr-custom" >/dev/null; then
+  fail "the Custom pick never reaches the tier case" "$(cat "$TMPDIR/stderr-custom")"
+fi
+# A plain tier pick on the same menu never fires the input prompt at all.
+FAKE_DURATION=60 FAKE_PICK=$'medium\tCRF 23 · ~23 MB' \
+  run_transcode "$TMPDIR/in.mov" mp4 1080p
+if grep -q '^menu-input:' "$calls"; then
+  fail "a tier pick never fires the input prompt" "$(cat "$calls")"
+fi
+pass "the sentinel label and the target: mint never leak to argv or the tier case"
+
+# An empty submit is exit-0-with-empty, NOT a cancel: it rides through
+# parse_target_size like any garbage and buys exactly one hinted re-prompt.
+FAKE_INPUT="" FAKE_INPUT2=25M FAKE_DURATION=60 \
+  FAKE_PICK=$'Custom size…\tEnter a size like 25M' \
+  run_transcode "$TMPDIR/in.mov" mp4 1080p
+[[ $(grep -c '^menu-input:' "$calls") -eq 2 ]] ||
+  fail "an empty submit re-prompts exactly once" "$(cat "$calls")"
+grep '^menu-input:' "$calls" | tail -n1 |
+  grep -F 'Invalid size — e.g. 25M' >/dev/null ||
+  fail "the re-prompt carries the Invalid size hint" "$(cat "$calls")"
+grep -q '^ffmpeg ' "$calls" ||
+  fail "an empty-then-valid run still encodes" "$(cat "$calls")"
+pass "an empty submit re-prompts once with the hint, then accepts"
+
+# Unparseable input gets the same single hinted re-prompt.
+FAKE_INPUT=bogus FAKE_INPUT2=25M FAKE_DURATION=60 \
+  FAKE_PICK=$'Custom size…\tEnter a size like 25M' \
+  run_transcode "$TMPDIR/in.mov" mp4 1080p
+[[ $(grep -c '^menu-input:' "$calls") -eq 2 ]] ||
+  fail "an unparseable answer re-prompts exactly once" "$(cat "$calls")"
+grep '^menu-input:' "$calls" | tail -n1 |
+  grep -F 'Invalid size — e.g. 25M' >/dev/null ||
+  fail "the unparseable re-prompt carries the hint" "$(cat "$calls")"
+grep -F 'Invalid target size: bogus' "$TMPDIR/stderr" >/dev/null ||
+  fail "the parse failure still reaches stderr" "$(cat "$TMPDIR/stderr")"
+grep -q '^ffmpeg ' "$calls" ||
+  fail "a garbage-then-valid run still encodes" "$(cat "$calls")"
+pass "an unparseable answer re-prompts once with the hint, then accepts"
+
+# The for 1 2 bound caps the budget at one re-prompt: a second bad answer
+# cancels like Esc -- nonzero, pre-notification, never a third prompt.
+status=0
+FAKE_INPUT=bogus FAKE_INPUT2=still-bogus FAKE_DURATION=60 \
+  FAKE_PICK=$'Custom size…\tEnter a size like 25M' \
+  run_transcode "$TMPDIR/in.mov" mp4 1080p || status=$?
+[[ $status -ne 0 ]] ||
+  fail "two bad answers cancel the run" "exit=$status"
+[[ $(grep -c '^menu-input:' "$calls") -eq 2 ]] ||
+  fail "the re-prompt budget never exceeds two prompts" "$(cat "$calls")"
+if grep -q 'notification:' "$calls" || grep -q '^ffmpeg ' "$calls"; then
+  fail "an exhausted re-prompt budget cancels before the notification" "$(cat "$calls")"
+fi
+pass "a second bad answer cancels like Esc, before the notification"
+
+# Esc at the re-prompt cancels through the same chain as Esc at the first.
+status=0
+FAKE_INPUT=bogus FAKE_DURATION=60 \
+  FAKE_PICK=$'Custom size…\tEnter a size like 25M' \
+  run_transcode "$TMPDIR/in.mov" mp4 1080p || status=$?
+[[ $status -ne 0 ]] ||
+  fail "Esc at the re-prompt cancels the run" "exit=$status"
+[[ $(grep -c '^menu-input:' "$calls") -eq 2 ]] ||
+  fail "Esc at the re-prompt still records both prompts" "$(cat "$calls")"
+grep '^menu-input:' "$calls" | tail -n1 |
+  grep -F 'Invalid size — e.g. 25M' >/dev/null ||
+  fail "the Esc'd re-prompt carried the hint" "$(cat "$calls")"
+if grep -q 'notification:' "$calls" || grep -q '^ffmpeg ' "$calls"; then
+  fail "Esc at the re-prompt cancels before the notification" "$(cat "$calls")"
+fi
+pass "Esc at the hinted re-prompt cancels before the notification"
+
+# Esc at the first input prompt aborts pre-notification like every sibling:
+# the two estimate probes ran but the planner never did, and nothing else
+# fired.
+status=0
+FAKE_DURATION=60 FAKE_PICK=$'Custom size…\tEnter a size like 25M' \
+  run_transcode "$TMPDIR/in.mov" mp4 1080p || status=$?
+[[ $status -ne 0 ]] ||
+  fail "Esc at the input prompt cancels the run" "exit=$status"
+[[ $(grep -c '^menu-input:' "$calls") -eq 1 ]] ||
+  fail "Esc at the first prompt records exactly one input call" "$(cat "$calls")"
+[[ $(grep -c '^ffprobe:' "$calls") -eq 2 ]] ||
+  fail "an input-prompt Esc aborts before the planner probes" "$(cat "$calls")"
+if grep -q 'notification:' "$calls" || grep -q '^ffmpeg ' "$calls"; then
+  fail "Esc at the input prompt cancels before the notification" "$(cat "$calls")"
+fi
+pass "Esc at the first input prompt cancels before the notification"
+
+# D-01: a parseable-below-floor answer refuses byte-identically to the CLI --
+# the re-prompt budget wraps the parser only, never plan_target.
+status=0
+FAKE_DURATION=60 run_transcode "$TMPDIR/in.mov" mp4 4k --target 4M || status=$?
+[[ $status -ne 0 ]] ||
+  fail "the --target 4M baseline refuses" "exit=$status"
+cp "$TMPDIR/stderr" "$TMPDIR/stderr-cli-4M"
+status=0
+FAKE_INPUT=4M FAKE_DURATION=60 FAKE_PICK=$'Custom size…\tEnter a size like 25M' \
+  run_transcode "$TMPDIR/in.mov" mp4 4k || status=$?
+[[ $status -ne 0 ]] ||
+  fail "a below-floor Custom answer refuses" "exit=$status"
+grep -F 'smallest achievable' "$TMPDIR/stderr" >/dev/null &&
+  grep -F '4 MB' "$TMPDIR/stderr" >/dev/null ||
+  fail "a below-floor Custom answer names the achievable minimum" "$(cat "$TMPDIR/stderr")"
+if ! cmp -s "$TMPDIR/stderr-cli-4M" "$TMPDIR/stderr"; then
+  fail "the Custom refusal is byte-identical to --target 4M" \
+    "$(diff -u "$TMPDIR/stderr-cli-4M" "$TMPDIR/stderr")"
+fi
+[[ $(grep -c '^menu-input:' "$calls") -eq 1 ]] ||
+  fail "a planner refusal never spends a re-prompt" "$(cat "$calls")"
+if grep -q 'notification:' "$calls" || grep -q '^ffmpeg ' "$calls"; then
+  fail "a below-floor Custom answer refuses before the notification" "$(cat "$calls")"
+fi
+pass "a below-floor Custom answer refuses byte-identically to --target 4M"
 
 # The accumulated ffmpeg argv across every run carries no overwrite flag --
 # dedupe and the passdir-sibling retry make -y and -n unnecessary.
