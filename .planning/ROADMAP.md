@@ -20,7 +20,7 @@ Milestone v1.2 inverts v1.1's estimate→actual loop: the user names a target ou
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 8: Non-interactive `--target` size targeting** - `omarchy transcode INPUT mp4 RES --target 25M` → parse size → plan (duration probe → bitrate → resolution step-down) → two-pass encode → one overshoot retry → actual-size notification; every refusal dies before menus/notifications
-- [ ] **Phase 9: Interactive `Custom size…` row** - mp4 quality menu gains a sentinel row → `omarchy-menu-input` free-text prompt → same parser/planner path → re-prompt once on bad input, clean cancel on Esc
+- [x] **Phase 9: Interactive `Custom size…` row** - mp4 quality menu gains a sentinel row → `omarchy-menu-input` free-text prompt → same parser/planner path → re-prompt once on bad input, clean cancel on Esc
 
 ## Phase Details
 
@@ -69,7 +69,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 **Plans**: 1 plan
 
-- [ ] 09-01-PLAN.md — mp4-only sentinel row + `omarchy-menu-input` handoff + `target:` return contract + re-prompt-once-then-cancel + `omarchy-menu-input` stub + interactive-parity assertions (Custom row ≡ `--target` argv) — one atomic commit
+- [x] 09-01-PLAN.md — mp4-only sentinel row + `omarchy-menu-input` handoff + `target:` return contract + re-prompt-once-then-cancel + `omarchy-menu-input` stub + interactive-parity assertions (Custom row ≡ `--target` argv) — one atomic commit
 
 ## Progress
 
@@ -79,7 +79,7 @@ Phases execute in numeric order: 8 → 9 (9 layers on 8's parser, planner, and d
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 8. Non-interactive `--target` size targeting | 1/1 | Complete | 2026-09-17 |
-| 9. Interactive `Custom size…` row | 0/1 | Pending |  |
+| 9. Interactive `Custom size…` row | 1/1 | Complete | 2026-09-17 |
 
 ## Next
 

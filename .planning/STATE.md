@@ -1,13 +1,13 @@
 ---
 gsd_state_version: "1.0"
 milestone: v1.2
-current_phase: 08
-current_phase_name: Non-interactive --target size targeting
+current_phase: 09
+current_phase_name: Interactive Custom size… row
 status: verifying
-stopped_at: Completed 08-01-PLAN.md
-last_updated: "2026-09-17T01:06:02.636Z"
+stopped_at: Completed 09-01-PLAN.md
+last_updated: "2026-09-17T12:25:00.000Z"
 last_activity: 2026-09-17
-last_activity_desc: Phase 08 execution started
+last_activity_desc: Completed 09-01-PLAN.md
 state_head: 2e4cab25d4e8b22ef859bc741690b104cb0057dc
 progress:
   total_phases: 2
@@ -24,22 +24,22 @@ milestone_name: Target-Size Transcode
 See: .planning/PROJECT.md (updated 2026-09-16)
 
 **Core value:** A transcode invoked for sharing should let the user trade quality for size knowingly — pick a quality tier, see roughly how big the result will be, and get the actual size when it finishes — without slowing down the default path.
-**Current focus:** Phase 08 — Non-interactive --target size targeting
+**Current focus:** Phase 09 — Interactive Custom size… row
 
 ## Current Position
 
-Phase: 08 (Non-interactive --target size targeting) — EXECUTING
+Phase: 09 (Interactive Custom size… row) — EXECUTING
 Plan: 1 of 1
 Status: Phase complete — ready for verification
-Last activity: 2026-09-17 — Phase 08 execution started
+Last activity: 2026-09-17 — Completed 09-01-PLAN.md
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 4
+- Total plans completed: 5
 - Average duration: 24 min
-- Total execution time: 0.8 hours
+- Total execution time: 1.1 hours
 
 **By Phase:**
 
@@ -49,6 +49,8 @@ Last activity: 2026-09-17 — Phase 08 execution started
 | 2 | 1 | 24 min | 24 min |
 | 06 | 1 | - | - |
 | 7 | 1 | - | - |
+| 8 | 1 | 46 min | 46 min |
+| 9 | 1 | 16 min | 16 min |
 
 **Recent Trend:**
 
@@ -66,6 +68,7 @@ Last activity: 2026-09-17 — Phase 08 execution started
 | Phase 05-non-interactive-quality-in-omarchy-transcode P01 | 14min | 3 tasks | 4 files |
 | Phase 06 P01 | 22 min | 3 tasks | 3 files |
 | Phase 08 P01 | 46min | 3 tasks | 2 files |
+| Phase 09 P01 | 16min | 3 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -88,6 +91,7 @@ Recent decisions affecting current work:
 - [Phase 08]: [Phase 08]: One atomic feat(08-01) commit carries script + harness; all v1.1 helper bodies byte-identical for the PR #12135 additive-diff window — the flag without the encoder is dead code; the parser without the flag is unreachable — the phase ships as one reviewable, independently revertible commit
 - [Phase 08]: Under --target the planner refuses rather than degrades — no qualitative fallback on probe failure, no overshoot tolerance band, no audio ladder; the refusal names the achievable minimum ~N MB — D-05/D-06/D-07 honesty contract: a guessed bitrate or silent retry loop would lie to the user about the size/quality trade
 - [Phase 08]: EXIT traps bake the resolved path (printf %q) — a function-local referenced by the trap string is unbound by the time errexit unwinds — the pass-1-failure hygiene row caught a real passlog leak; applies to any future tempdir+trap pattern in bin/
+- [Phase 09]: Interactive Custom size… row lands as one atomic feat(09-01) commit (script + stub harness): mp4-gated sentinel row appended last with mandatory subtext, post-strip/pre-case branch mints target:<bytes>, bounded for-1-2 prompt_target_size owns the re-prompt budget + D-02 hint, main() unwraps inside the menu gate so argv is byte-identical to --target; IN-01/IN-03 folded in
 
 ### Roadmap Evolution
 
@@ -101,6 +105,7 @@ None yet.
 
 - Phase 2 depends on Phase 1: the panel must call a CLI that persists correctly — satisfied; the panel now invokes `omarchy-hyprland-monitor-scaling <SCALE> [monitor]`
 - `./test/shell` has 7 pre-existing environmental failures (bar-icon-geometry, config, locate, runtime-smoke, screenshot-sanity, snapper, unowned-system-paths) — all reproduce at base commit 41b7ea3d in a clean worktree; still the only failures after 02-01
+- `./test/shell` also showed a `bar-widget-contract-test.sh` teardown flake during the 09-01 sweep (`rm -rf $TMPDIR` raced an async `home/.codex` — the test's own assertion passed; passes 3/3 standalone, unrelated to the phase)
 - Focused suites green: monitor-scaling (36 cases), monitor-state, monitor-test (42 assertions incl. textual QML pins); `./test/cli` exit 0
 - Running-UI visual verification of own-screen targeting is pending user UAT (checklist in 02-01-SUMMARY.md) — the dev shell loads the packaged /usr/share/omarchy tree, so it was documented, not executed
 - Housekeeping for phase transition: the stale REQUIREMENTS.md Out-of-Scope row ("Panel reads `hyprctl monitors -j` itself") is superseded by D-06
@@ -117,6 +122,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-17T01:05:12.317Z
-Stopped at: Completed 08-01-PLAN.md
+Last session: 2026-09-17T12:25:00.000Z
+Stopped at: Completed 09-01-PLAN.md
 Resume file: None
