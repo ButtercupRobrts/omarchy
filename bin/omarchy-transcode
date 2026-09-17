@@ -231,7 +231,7 @@ estimate_label() {
   awk -v dur="$1" -v kbps="$2" -v audio="$3" -v src="$4" 'BEGIN {
     bytes = dur * (kbps + audio) * 125          # kbps * 1000 / 8 bytes per second
     if (src != "" && bytes > src) { print "larger than source"; exit }
-    mb = bytes / 1048576                      # MiB, the scale the completion notification reports
+    mb = bytes / 1000000                      # decimal MB -- matches file managers and upload limits
     if (mb < 1) { print "~1 MB"; exit }
     d = int(log(mb) / log(10)) - 1            # round to 2 significant figures
     if (d < -1) d = -1
@@ -306,8 +306,8 @@ output_size_label() {
   bytes=$(stat -c %s "$1" 2>/dev/null || true)
   [[ $bytes =~ ^[0-9]+$ ]] || return 1
   awk -v b="$bytes" 'BEGIN {
-    if (b > 0 && b < 1048576) { printf "<1 MB"; exit }
-    printf "%.0f MB", b / 1048576
+    if (b > 0 && b < 1000000) { printf "<1 MB"; exit }
+    printf "%.0f MB", b / 1000000
   }'
 }
 
@@ -315,8 +315,10 @@ output_size_label() {
 # meaning MB) into integer bytes on stdout, or prints an error on stderr and
 # returns 1. A pure validator -- callers own the exit code (the flag arm
 # propagates 2) and Phase 9's Custom size row re-prompts on failure. The raw
-# string is discarded here: only the integer bytes and the numfmt --to=iec
-# token derived from them ever reach a filename or ffmpeg argv.
+# string is discarded here: only the integer bytes and the numfmt --to=si
+# token derived from them ever reach a filename or ffmpeg argv. Units are
+# decimal (SI): 25M means 25,000,000 bytes, matching file managers and
+# upload limits like Discord's.
 parse_target_size() {
   local raw="$1" normalized bytes
 
@@ -327,7 +329,7 @@ parse_target_size() {
   normalized="${normalized^^}"  # uppercase the unit letter: 25m -> 25M
   [[ $normalized =~ [KMG]$ ]] || normalized+="M" # a bare number means MB
 
-  bytes=$(numfmt --from=iec "$normalized") ||
+  bytes=$(numfmt --from=si "$normalized") ||
     { echo "Invalid target size: $raw" >&2; return 1; }
   (( bytes > 0 )) ||
     { echo "Invalid target size: $raw" >&2; return 1; }
@@ -371,7 +373,7 @@ plan_target() {
 
   src_bytes=$(stat -c %s "$input" 2>/dev/null || true)
   if [[ $src_bytes =~ ^[0-9]+$ ]] && (( target_bytes >= src_bytes )); then
-    echo "Invalid --target: $(numfmt --to=iec "$target_bytes") meets or exceeds the source size ($(numfmt --to=iec "$src_bytes")); drop --target and pick a quality for format conversion" >&2
+    echo "Invalid --target: $(numfmt --to=si "$target_bytes") meets or exceeds the source size ($(numfmt --to=si "$src_bytes")); drop --target and pick a quality for format conversion" >&2
     return 1
   fi
 
@@ -404,10 +406,10 @@ plan_target() {
     1080p) res=720p ;;
     *)
       # Below the 720p floor: refuse naming the achievable minimum at that
-      # floor -- (400k + audio) * duration * 125 bytes, MiB labeled "MB".
+      # floor -- (400k + audio) * duration * 125 bytes, in decimal MB.
       min_label=$(awk -v a="$audio_kbps" -v d="$duration" \
-        'BEGIN { printf "%.0f MB", (400 + a) * d * 125 / 1048576 }')
-      echo "Cannot fit under $(numfmt --to=iec "$target_bytes") -- smallest achievable is ~$min_label for this duration" >&2
+        'BEGIN { printf "%.0f MB", (400 + a) * d * 125 / 1000000 }')
+      echo "Cannot fit under $(numfmt --to=si "$target_bytes") -- smallest achievable is ~$min_label for this duration" >&2
       return 1
       ;;
     esac
@@ -514,7 +516,7 @@ main() {
       shift
       (( $# > 0 )) || { echo "Missing value for --target" >&2; return 2; }
       target_bytes=$(parse_target_size "$1") || return 2
-      target_token=$(numfmt --to=iec "$target_bytes")
+      target_token=$(numfmt --to=si "$target_bytes")
       ;;
     --help | -h)
       usage
@@ -640,7 +642,7 @@ main() {
       target_bytes="${quality#target:}"
       [[ $target_bytes =~ ^[0-9]+$ ]] ||
         { echo "Invalid target size: $target_bytes" >&2; return 1; }
-      target_token=$(numfmt --to=iec "$target_bytes")
+      target_token=$(numfmt --to=si "$target_bytes")
       quality=""
     fi
   fi

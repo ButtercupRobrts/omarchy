@@ -209,7 +209,7 @@ run_transcode() {
 }
 
 # A sized fixture: stat reports 120 MiB, above the largest pinned estimate
-# (~107 MiB at dur=157/1080p/high), so estimate rows render numbers instead of
+# (~110 MB at dur=157/1080p/high), so estimate rows render numbers instead of
 # degrading to larger-than-source. Sparse, so it costs no real blocks.
 truncate -s 120M "$TMPDIR/in.mov"
 touch "$TMPDIR/img.png"
@@ -454,13 +454,13 @@ pass "usage documents [quality] and the video tiers"
 # rows (leading tab = empty glyph field) carrying CRF N · ~N MB subtexts at the
 # locked 1080p midpoints plus the 192k audio term, and --default-index 1
 # pre-highlighting medium.
-FAKE_DURATION=60 FAKE_PICK=$'medium\tCRF 23 · ~23 MB' \
+FAKE_DURATION=60 FAKE_PICK=$'medium\tCRF 23 · ~24 MB' \
   run_transcode "$TMPDIR/in.mov" mp4 1080p
 grep -F 'Select quality' "$calls" >/dev/null ||
   fail "an unset video quality fires the Select quality menu" "$(cat "$calls")"
 grep -F -- '--default-index 1' "$calls" >/dev/null ||
   fail "the quality menu pre-highlights medium" "$(cat "$calls")"
-for row in $'\thigh\tCRF 18 · ~41 MB' $'\tmedium\tCRF 23 · ~23 MB' $'\tlow\tCRF 28 · ~11 MB'; do
+for row in $'\thigh\tCRF 18 · ~43 MB' $'\tmedium\tCRF 23 · ~24 MB' $'\tlow\tCRF 28 · ~12 MB'; do
   grep -F "$row" "$calls" >/dev/null ||
     fail "the quality menu offers a $row row" "$(cat "$calls")"
 done
@@ -514,10 +514,10 @@ fi
 pass "an empty menu pick aborts before the notification"
 
 # Sig-fig rendering: a 157 s clip at 1080p rounds each estimate to 1-2
-# significant figures (~110 / ~60 / ~30 MB) -- never a decimal point.
-FAKE_DURATION=157 FAKE_PICK=$'medium\tCRF 23 · ~60 MB' \
+# significant figures (~110 / ~63 / ~31 MB) -- never a decimal point.
+FAKE_DURATION=157 FAKE_PICK=$'medium\tCRF 23 · ~63 MB' \
   run_transcode "$TMPDIR/in.mov" mp4 1080p
-for row in 'CRF 18 · ~110 MB' 'CRF 23 · ~60 MB' 'CRF 28 · ~30 MB'; do
+for row in 'CRF 18 · ~110 MB' 'CRF 23 · ~63 MB' 'CRF 28 · ~31 MB'; do
   grep -F "$row" "$calls" >/dev/null ||
     fail "a 157 s clip offers a $row row" "$(cat "$calls")"
 done
@@ -526,17 +526,17 @@ if grep '^menu-select: ' "$calls" | grep -E '~[0-9]*\.[0-9]' >/dev/null; then
 fi
 pass "estimates render at 1-2 significant figures with no decimals"
 
-# A 15 MiB source sits between the low (~11 MB) and medium (~23 MB) estimates
+# A 15 MiB source sits between the low (~12 MB) and medium (~24 MB) estimates
 # at 60 s/1080p, so only the exceeding tiers degrade -- per-row, never the
 # whole menu.
 truncate -s 15M "$TMPDIR/small.mov"
-FAKE_DURATION=60 FAKE_PICK=$'low\tCRF 28 · ~11 MB' \
+FAKE_DURATION=60 FAKE_PICK=$'low\tCRF 28 · ~12 MB' \
   run_transcode "$TMPDIR/small.mov" mp4 1080p
 grep -F $'\thigh\tCRF 18 · larger than source' "$calls" >/dev/null ||
   fail "the high row degrades when its estimate exceeds the source" "$(cat "$calls")"
 grep -F $'\tmedium\tCRF 23 · larger than source' "$calls" >/dev/null ||
   fail "the medium row degrades when its estimate exceeds the source" "$(cat "$calls")"
-grep -F $'\tlow\tCRF 28 · ~11 MB' "$calls" >/dev/null ||
+grep -F $'\tlow\tCRF 28 · ~12 MB' "$calls" >/dev/null ||
   fail "the low row keeps its estimate under the source size" "$(cat "$calls")"
 rm -f "$TMPDIR/small.mov"
 pass "larger than source degrades per row, not per menu"
@@ -583,10 +583,10 @@ grep '^ffmpeg ' "$calls" >/dev/null ||
 pass "a failed probe degrades to qualitative rows without aborting"
 
 # A proven-audio-less source drops the 192k term: 60 s at 1080p renders
-# ~39/~21/~10 MB instead of ~41/~23/~11.
-FAKE_AUDIO=no FAKE_DURATION=60 FAKE_PICK=$'medium\tCRF 23 · ~21 MB' \
+# ~41/~23/~11 MB instead of ~43/~24/~12.
+FAKE_AUDIO=no FAKE_DURATION=60 FAKE_PICK=$'medium\tCRF 23 · ~23 MB' \
   run_transcode "$TMPDIR/in.mov" mp4 1080p
-for row in $'\thigh\tCRF 18 · ~39 MB' $'\tmedium\tCRF 23 · ~21 MB' $'\tlow\tCRF 28 · ~10 MB'; do
+for row in $'\thigh\tCRF 18 · ~41 MB' $'\tmedium\tCRF 23 · ~23 MB' $'\tlow\tCRF 28 · ~11 MB'; do
   grep -F "$row" "$calls" >/dev/null ||
     fail "a source with no audio stream offers a $row row" "$(cat "$calls")"
 done
@@ -667,21 +667,22 @@ fi
 pass "an unknown format fails before any menu or notification"
 
 # The done notification reports the output's real size: FAKE_OUT_BYTES makes
-# the stub write a 38.00 MiB file, the script's own stat+awk chain measures
-# it, and the body lands as "(38 MB)" -- the same MiB scale the ~N MB menu
-# estimates use. Assertions filter on 'Transcoded to' because the start
+# the stub write a 39,845,888-byte file, the script's own stat+awk chain
+# measures it, and the body lands as "(40 MB)" -- the same decimal-MB scale
+# the ~N MB menu estimates and file managers use. Assertions filter on
+# 'Transcoded to' because the start
 # notification body carries its own parenthetical. The knob-created output
 # is this row's fixture -- rm -f it after asserting.
 FAKE_OUT_BYTES=39845888 run_transcode "$TMPDIR/in.mov" mp4 1080p medium
 grep 'notification:' "$calls" | grep -F 'Transcoded to 1080p mp4' |
-  grep -F 'Saved and copied to clipboard (38 MB).' >/dev/null ||
+  grep -F 'Saved and copied to clipboard (40 MB).' >/dev/null ||
   fail "the video done notification reports the output size" "$(cat "$calls")"
 rm -f "$TMPDIR/in-1080p.mp4"
 pass "the video done notification reports the output size"
 
 FAKE_OUT_BYTES=39845888 run_transcode "$TMPDIR/img.png" jpg medium
 grep 'notification:' "$calls" | grep -F 'Transcoded to medium jpg' |
-  grep -F 'Saved and copied to clipboard (38 MB).' >/dev/null ||
+  grep -F 'Saved and copied to clipboard (40 MB).' >/dev/null ||
   fail "the picture done notification reports the output size" "$(cat "$calls")"
 rm -f "$TMPDIR/img-medium.jpg"
 pass "the picture done notification reports the output size"
@@ -716,7 +717,7 @@ pass "a failed encode sends zero done notifications"
 # cheap pin that no arm is left on the plain body.
 FAKE_OUT_BYTES=39845888 run_transcode "$TMPDIR/in.mov" gif 720p low
 grep 'notification:' "$calls" | grep -F 'Transcoded to 720p gif' |
-  grep -F 'Saved and copied to clipboard (38 MB).' >/dev/null ||
+  grep -F 'Saved and copied to clipboard (40 MB).' >/dev/null ||
   fail "the gif done notification reports the output size" "$(cat "$calls")"
 rm -f "$TMPDIR/in-720p-low.gif"
 pass "the gif done notification reports the output size"
@@ -729,12 +730,12 @@ FAKE_OUT_BYTES=39845888 run_transcode "$TMPDIR/in.mov" mp4 1080p medium
 grep -Fx "out=$TMPDIR/in-1080p-2.mp4" "$calls" >/dev/null ||
   fail "an existing output dedupes to -2 with FAKE_OUT_BYTES set" "$(cat "$calls")"
 grep 'notification:' "$calls" | grep -F 'Transcoded to 1080p mp4' |
-  grep -F 'Saved and copied to clipboard (38 MB).' >/dev/null ||
+  grep -F 'Saved and copied to clipboard (40 MB).' >/dev/null ||
   fail "a deduped output reports its own size" "$(cat "$calls")"
 rm -f "$TMPDIR/in-1080p.mp4" "$TMPDIR/in-1080p-2.mp4"
 pass "a deduped output reports the size of the file actually written"
 
-# A non-empty output under 1 MiB reads "(<1 MB)", never "(0 MB)" -- a zero
+# A non-empty output under 1 MB reads "(<1 MB)", never "(0 MB)" -- a zero
 # size on a real file would read as a lie next to the ~1 MB estimate floor.
 FAKE_OUT_BYTES=200000 run_transcode "$TMPDIR/in.mov" mp4 1080p medium
 grep 'notification:' "$calls" | grep -F 'Transcoded to 1080p mp4' |
@@ -743,8 +744,8 @@ grep 'notification:' "$calls" | grep -F 'Transcoded to 1080p mp4' |
 rm -f "$TMPDIR/in-1080p.mp4"
 pass "a sub-1 MiB output reports <1 MB"
 
-# Sub-10 MiB estimates round instead of flooring (WR-01): 18 s at 720p with
-# 192k audio is 5.8/3.6/1.9 MiB -- %.0f renders ~6/~4/~2 where the old %d
+# Sub-10 MB estimates round instead of flooring (WR-01): 18 s at 720p with
+# 192k audio is 6.1/3.8/2.0 MB -- %.0f renders ~6/~4/~2 where the old %d
 # floored to ~5/~3/~1. All three sit far below the 120 MiB fixture, so no
 # larger-than-source degrade interferes.
 FAKE_DURATION=18 FAKE_PICK=$'medium\tCRF 23 · ~4 MB' \
@@ -756,8 +757,8 @@ done
 pass "sub-10 MiB estimates round instead of flooring"
 
 # --- --target: happy path -------------------------------------------------
-# 25M over a 60 s clip with 192k audio derives 26214400*8/60/1000*0.98-192 =
-# 3233k, so 1080p holds its 800k floor and the run two-passes at the derived
+# 25M over a 60 s clip with 192k audio derives 25000000*8/60/1000*0.98-192 =
+# 3074k, so 1080p holds its 800k floor and the run two-passes at the derived
 # rate: pass 1 stats-only to /dev/null, pass 2 the real encode -- with
 # -vf/-c:v/-preset/-b:v byte-identical across passes and no -crf anywhere.
 FAKE_DURATION=60 run_transcode "$TMPDIR/in.mov" mp4 1080p --target 25M
@@ -768,7 +769,7 @@ pass1_line=$(grep -m1 ' -pass 1 ' "$calls")
 pass2_line=$(grep -m1 ' -pass 2 ' "$calls")
 [[ -n $pass1_line && -n $pass2_line ]] ||
   fail "a --target run records a pass 1 and a pass 2 line" "$(cat "$calls")"
-for frag in '-pass 1' '-passlogfile' '-an' '-f null /dev/null' '-b:v 3233k' \
+for frag in '-pass 1' '-passlogfile' '-an' '-f null /dev/null' '-b:v 3074k' \
     'scale=-2:1080' '-c:v libx264' '-preset fast'; do
   grep -F -- "$frag" <<<"$pass1_line" >/dev/null ||
     fail "pass 1 carries $frag" "$pass1_line"
@@ -778,7 +779,7 @@ for frag in '-crf' '-movflags' '-c:a'; do
     fail "pass 1 never carries $frag" "$pass1_line"
   fi
 done
-for frag in '-pass 2' '-passlogfile' '-b:v 3233k' '-c:a aac' '-b:a 192k' \
+for frag in '-pass 2' '-passlogfile' '-b:v 3074k' '-c:a aac' '-b:a 192k' \
     '-movflags +faststart'; do
   grep -F -- "$frag" <<<"$pass2_line" >/dev/null ||
     fail "pass 2 carries $frag" "$pass2_line"
@@ -860,7 +861,7 @@ if [[ -s $calls ]]; then
 fi
 pass "a missing --target value exits 2 with an empty call log"
 
-# Step-down: a 4k request on a 10M/60s budget derives 1178k -- below the 4k
+# Step-down: a 4k request on a 10M/60s budget derives 1114k -- below the 4k
 # floor (2000k) but above 1080p's (800k) -- so the run steps to 1080p and the
 # filename and toasts all name the effective rung with the disclosure.
 FAKE_DURATION=60 run_transcode "$TMPDIR/in.mov" mp4 4k --target 10M
@@ -868,8 +869,8 @@ grep -Fx "out=$TMPDIR/in-1080p-10M.mp4" "$calls" >/dev/null ||
   fail "a 10M target at 4k steps down to the -1080p-10M name" "$(cat "$calls")"
 grep ' -pass 2 ' "$calls" | grep -F 'scale=-2:1080' >/dev/null ||
   fail "a stepped-down run encodes at 1080p" "$(cat "$calls")"
-grep ' -pass 2 ' "$calls" | grep -F -- '-b:v 1178k' >/dev/null ||
-  fail "a stepped-down run derives -b:v 1178k" "$(cat "$calls")"
+grep ' -pass 2 ' "$calls" | grep -F -- '-b:v 1114k' >/dev/null ||
+  fail "a stepped-down run derives -b:v 1114k" "$(cat "$calls")"
 grep 'notification:' "$calls" | grep -F '1080p' |
   grep -F 'stepped down from 4k' | grep -F '10M' >/dev/null ||
   fail "the start toast names the effective rung, the step-down, and the target" "$(cat "$calls")"
@@ -877,27 +878,27 @@ grep 'notification:' "$calls" | grep -F 'Transcoded to 1080p mp4' >/dev/null ||
   fail "the done toast names the effective rung too" "$(cat "$calls")"
 pass "a 4k request on a 10M budget steps down to 1080p and says so"
 
-# One rung further: 5M/60s derives 493k -- below 1080p's floor, above 720p's.
-# numfmt --to=iec canonicalizes exact-MiB targets at 3 significant figures, so
-# 5M ships as the -5.0M token (the accepted 1.0M-style shape).
+# One rung further: 5M/60s derives 461k -- below 1080p's floor, above 720p's.
+# numfmt --to=si canonicalizes exact-decimal targets at 3 significant figures,
+# so 5M ships as the -5.0M token (the accepted 1.0M-style shape).
 FAKE_DURATION=60 run_transcode "$TMPDIR/in.mov" mp4 4k --target 5M
 grep -Fx "out=$TMPDIR/in-720p-5.0M.mp4" "$calls" >/dev/null ||
   fail "a 5M target at 4k steps down to the -720p-5.0M name" "$(cat "$calls")"
 grep ' -pass 2 ' "$calls" | grep -F 'scale=-2:720' >/dev/null ||
   fail "a 5M target encodes at 720p" "$(cat "$calls")"
-grep ' -pass 2 ' "$calls" | grep -F -- '-b:v 493k' >/dev/null ||
-  fail "a 5M target derives -b:v 493k" "$(cat "$calls")"
+grep ' -pass 2 ' "$calls" | grep -F -- '-b:v 461k' >/dev/null ||
+  fail "a 5M target derives -b:v 461k" "$(cat "$calls")"
 pass "a 4k request on a 5M budget steps down to 720p"
 
-# Boundary: 25M/60s derives 3233k, at or above the 4k floor, so a 4k request
+# Boundary: 25M/60s derives 3074k, at or above the 4k floor, so a 4k request
 # stays at 4k on libx265 -preset slow.
 FAKE_DURATION=60 run_transcode "$TMPDIR/in.mov" mp4 4k --target 25M
 grep ' -pass 2 ' "$calls" | grep -F 'scale=-2:2160' >/dev/null ||
   fail "a 25M target at 4k keeps the 4k scale" "$(cat "$calls")"
 grep ' -pass 2 ' "$calls" | grep -F -- '-c:v libx265 -preset slow' >/dev/null ||
   fail "a 25M target at 4k keeps the x265 codec" "$(cat "$calls")"
-grep ' -pass 2 ' "$calls" | grep -F -- '-b:v 3233k' >/dev/null ||
-  fail "a 25M target at 4k derives -b:v 3233k" "$(cat "$calls")"
+grep ' -pass 2 ' "$calls" | grep -F -- '-b:v 3074k' >/dev/null ||
+  fail "a 25M target at 4k derives -b:v 3074k" "$(cat "$calls")"
 grep -Fx "out=$TMPDIR/in-4k-25M.mp4" "$calls" >/dev/null ||
   fail "a 25M target at 4k writes the -4k-25M name" "$(cat "$calls")"
 pass "a target at or above the 4k floor stays at 4k"
@@ -989,7 +990,7 @@ grep ' -pass 2 ' "$calls" | grep -F 'scale=-2:720' >/dev/null ||
   fail "a stepped-down menu pick encodes at 720p" "$(cat "$calls")"
 pass "an unset resolution prompts as the planner ceiling under --target"
 
-# Below every floor: 4M and 2M over 60 s derive 356k and 82k -- under 720p's
+# Below every floor: 4M and 2M over 60 s derive 330k and 69k -- under 720p's
 # 400k floor -- so both refuse naming the computed achievable minimum
 # ((400+192)*60*125 = 4,440,000 B, rendered ~4 MB). The probes ran, but no
 # notification or encode did.
@@ -1010,7 +1011,7 @@ done
 pass "targets below every floor refuse naming the achievable minimum"
 
 # 1M over 60 s leaves no room even for the 192k audio stream (the derived
-# -54k rides the floor loop to the same refusal) -- and no negative, zero, or
+# -61k rides the floor loop to the same refusal) -- and no negative, zero, or
 # -nan -b:v ever reaches ffmpeg argv on any accumulated line.
 status=0
 FAKE_DURATION=60 run_transcode "$TMPDIR/in.mov" mp4 720p --target 1M || status=$?
@@ -1033,7 +1034,7 @@ FAKE_DURATION=60 run_transcode "$TMPDIR/in.mov" mp4 1080p --target 200M || statu
 [[ $status -eq 1 ]] ||
   fail "a target at or above the source exits 1" "exit=$status"
 grep -F '200M' "$TMPDIR/stderr" >/dev/null &&
-  grep -F '120M' "$TMPDIR/stderr" >/dev/null &&
+  grep -F '126M' "$TMPDIR/stderr" >/dev/null &&
   grep -F 'quality' "$TMPDIR/stderr" >/dev/null ||
   fail "a >=source refusal names both sizes and the tier path" "$(cat "$TMPDIR/stderr")"
 if grep -q '^ffprobe:' "$calls"; then
@@ -1078,12 +1079,12 @@ fi
 pass "failed, N/A, and zero durations all refuse before any notification"
 
 # The probed audio term actually moves the math: a proven-audio-less source
-# drops the 192k term, so 5M/60s at a 4k request derives 685k (not 493k).
+# drops the 192k term, so 5M/60s at a 4k request derives 653k (not 461k).
 FAKE_AUDIO=no FAKE_DURATION=60 run_transcode "$TMPDIR/in.mov" mp4 4k --target 5M
 grep ' -pass 2 ' "$calls" | grep -F 'scale=-2:720' >/dev/null ||
   fail "a no-audio 5M target still steps to 720p" "$(cat "$calls")"
-grep ' -pass 2 ' "$calls" | grep -F -- '-b:v 685k' >/dev/null ||
-  fail "a no-audio 5M target derives -b:v 685k" "$(cat "$calls")"
+grep ' -pass 2 ' "$calls" | grep -F -- '-b:v 653k' >/dev/null ||
+  fail "a no-audio 5M target derives -b:v 653k" "$(cat "$calls")"
 pass "a proven-audio-less source drops the 192k term from the math"
 
 # The never-probes pin holds: a four-positional tier run never calls
@@ -1095,11 +1096,11 @@ fi
 pass "a four-positional tier run still never probes or prompts"
 
 # --- --target: overshoot retry and passlog hygiene --------------------------
-# One byte over triggers exactly one pass-2-only retry: 50M/60s derives 6658k,
+# One byte over triggers exactly one pass-2-only retry: 50M/60s derives 6341k,
 # the first pass-2 output measures 52428801 B, so the retry bitrate is
-# 6658*52428800/52428801 truncated to 6657k. The retry encodes to a passdir
+# 6341*50000000/52428801 truncated to 6047k. The retry encodes to a passdir
 # sibling and mv's onto $output, so the done toast and stat report the retry
-# file's real 4 MiB. FAKE_OUT_BYTES feeds pass-2 #1, FAKE_OUT_BYTES2 #2; the
+# file's real ~4 MB. FAKE_OUT_BYTES feeds pass-2 #1, FAKE_OUT_BYTES2 #2; the
 # knob-created files are this row's fixtures -- rm -f after asserting.
 FAKE_OUT_BYTES=52428801 FAKE_OUT_BYTES2=4194304 FAKE_DURATION=60 \
   run_transcode "$TMPDIR/in.mov" mp4 720p --target 50M
@@ -1107,8 +1108,8 @@ FAKE_OUT_BYTES=52428801 FAKE_OUT_BYTES2=4194304 FAKE_DURATION=60 \
   fail "an overshoot run makes exactly three ffmpeg calls" "$(cat "$calls")"
 [[ $(grep -c '^ffmpeg .*retry\.mp4' "$calls") -eq 1 ]] ||
   fail "an overshoot triggers exactly one retry" "$(cat "$calls")"
-grep '^ffmpeg .*retry\.mp4' "$calls" | grep -F -- '-b:v 6657k' >/dev/null ||
-  fail "the retry tightens to -b:v 6657k" "$(cat "$calls")"
+grep '^ffmpeg .*retry\.mp4' "$calls" | grep -F -- '-b:v 6047k' >/dev/null ||
+  fail "the retry tightens to -b:v 6047k" "$(cat "$calls")"
 grep '^ffmpeg .*retry\.mp4' "$calls" | grep -F 'scale=-2:720' >/dev/null ||
   fail "the retry keeps the 720p resolution" "$(cat "$calls")"
 grep '^ffmpeg .*retry\.mp4' "$calls" | grep -F -- '-c:v libx264 -preset fast' >/dev/null ||
@@ -1134,9 +1135,9 @@ rm -f "$TMPDIR/in-720p-50M.mp4"
 pass "a byte-over target retries pass-2 once at the tightened bitrate"
 
 # At or under target: no retry at all. The boundary is inclusive -- exactly
-# 94371840 B against a 90M target is a hit, and 83886079 B against 80M is a
+# 90000000 B against a 90M target is a hit, and 79999999 B against 80M is a
 # hit by one byte.
-FAKE_OUT_BYTES=94371840 FAKE_DURATION=60 \
+FAKE_OUT_BYTES=90000000 FAKE_DURATION=60 \
   run_transcode "$TMPDIR/in.mov" mp4 720p --target 90M
 [[ $(grep -c '^ffmpeg ' "$calls") -eq 2 ]] ||
   fail "an exactly-at-target run makes two ffmpeg calls" "$(cat "$calls")"
@@ -1145,7 +1146,7 @@ grep 'notification:' "$calls" | grep -F 'Transcoded to 720p mp4' |
   fail "an at-target run reports its real size" "$(cat "$calls")"
 rm -f "$TMPDIR/in-720p-90M.mp4"
 
-FAKE_OUT_BYTES=83886079 FAKE_DURATION=60 \
+FAKE_OUT_BYTES=79999999 FAKE_DURATION=60 \
   run_transcode "$TMPDIR/in.mov" mp4 720p --target 80M
 [[ $(grep -c '^ffmpeg ' "$calls") -eq 2 ]] ||
   fail "a one-byte-under run makes two ffmpeg calls" "$(cat "$calls")"
@@ -1164,13 +1165,13 @@ FAKE_OUT_BYTES=62914561 FAKE_OUT_BYTES2=62914561 FAKE_DURATION=60 \
 [[ $(grep -c '^ffmpeg .*retry\.mp4' "$calls") -eq 1 ]] ||
   fail "a still-over result never triggers a second retry" "$(cat "$calls")"
 grep 'notification:' "$calls" | grep -F 'Transcoded to 720p mp4' |
-  grep -F '(60 MB)' >/dev/null ||
+  grep -F '(63 MB)' >/dev/null ||
   fail "a still-over retry reports the real overshot size" "$(cat "$calls")"
 rm -f "$TMPDIR/in-720p-60M.mp4"
 pass "an overshoot retries at most once"
 
 # A failed retry preserves the overshot-but-playable first output: no mv, the
-# 70M+1-byte file stays put, and the done toast still reports its real size.
+# over-target file stays put, and the done toast still reports its real size.
 FAKE_OUT_BYTES=73400321 FAKE_PASS2_RC="0 1" FAKE_DURATION=60 \
   run_transcode "$TMPDIR/in.mov" mp4 720p --target 70M
 [[ $(grep -c '^ffmpeg .*retry\.mp4' "$calls") -eq 1 ]] ||
@@ -1179,7 +1180,7 @@ FAKE_OUT_BYTES=73400321 FAKE_PASS2_RC="0 1" FAKE_DURATION=60 \
   [[ $(stat -c %s "$TMPDIR/in-720p-70M.mp4") -eq 73400321 ]] ||
   fail "a failed retry preserves the first output" "$(ls -l "$TMPDIR")"
 grep 'notification:' "$calls" | grep -F 'Transcoded to 720p mp4' |
-  grep -F '(70 MB)' >/dev/null ||
+  grep -F '(73 MB)' >/dev/null ||
   fail "a failed retry still reports the real size" "$(cat "$calls")"
 if find "$TMPDIR" -name '*2pass*' -print -quit | grep -q .; then
   fail "a failed retry leaves no passlog artifacts" \
@@ -1312,7 +1313,7 @@ if grep -F 'Invalid video quality' "$TMPDIR/stderr-custom" >/dev/null; then
   fail "the Custom pick never reaches the tier case" "$(cat "$TMPDIR/stderr-custom")"
 fi
 # A plain tier pick on the same menu never fires the input prompt at all.
-FAKE_DURATION=60 FAKE_PICK=$'medium\tCRF 23 · ~23 MB' \
+FAKE_DURATION=60 FAKE_PICK=$'medium\tCRF 23 · ~24 MB' \
   run_transcode "$TMPDIR/in.mov" mp4 1080p
 if grep -q '^menu-input:' "$calls"; then
   fail "a tier pick never fires the input prompt" "$(cat "$calls")"
