@@ -9,10 +9,10 @@ Requirements for this milestone. Each maps to roadmap phases.
 
 ### Size Targeting
 
-- [ ] **SIZE-10**: `omarchy transcode <video> [mp4] [res] --target 25M` parses free-text sizes (`25M`, `1.5G`, `500K`, `25MB`; bare number = MB) into integer bytes and two-pass encodes to hit the byte budget — video bitrate = `target×8 ÷ duration × ~0.98 reserve − 192k audio`; completion notification reports the actual size (existing SIZE-02 mechanism)
-- [ ] **SIZE-13**: Resolution auto-step-down — the planner picks the highest rung (4k → 1080p → 720p) whose video-bitrate floor fits the budget; the output filename and both notifications name the *actual* resolution used; when no rung fits, refuse with the achievable minimum size rather than produce a negative/zero bitrate
-- [ ] **SIZE-14**: Audio stays at fixed `-b:a 192k`; when the budget cannot fit 192k audio plus a viable video bitrate, refuse early — before menus/notifications — naming the minimum achievable target
-- [ ] **SIZE-15**: When a completed encode lands *over* the target, re-encode once with a tightened budget (scaled by the overshoot ratio); after one retry, report the actual size either way — never a silent loop
+- [x] **SIZE-10**: `omarchy transcode <video> [mp4] [res] --target 25M` parses free-text sizes (`25M`, `1.5G`, `500K`, `25MB`; bare number = MB) into integer bytes and two-pass encodes to hit the byte budget — video bitrate = `target×8 ÷ duration × ~0.98 reserve − 192k audio`; completion notification reports the actual size (existing SIZE-02 mechanism)
+- [x] **SIZE-13**: Resolution auto-step-down — the planner picks the highest rung (4k → 1080p → 720p) whose video-bitrate floor fits the budget; the output filename and both notifications name the *actual* resolution used; when no rung fits, refuse with the achievable minimum size rather than produce a negative/zero bitrate
+- [x] **SIZE-14**: Audio stays at fixed `-b:a 192k`; when the budget cannot fit 192k audio plus a viable video bitrate, refuse early — before menus/notifications — naming the minimum achievable target
+- [x] **SIZE-15**: When a completed encode lands *over* the target, re-encode once with a tightened budget (scaled by the overshoot ratio); after one retry, report the actual size either way — never a silent loop
 
 ### Interactive
 
@@ -20,7 +20,7 @@ Requirements for this milestone. Each maps to roadmap phases.
 
 ### Safety / Refusals
 
-- [ ] **SAFE-02**: `--target` is mutually exclusive with the positional quality arg (error naming both); refuses gif format (`-b:v` is verified meaningless for palette output) and picture inputs; fails fast before the start notification on missing value, unparseable size, or duration-probe failure
+- [x] **SAFE-02**: `--target` is mutually exclusive with the positional quality arg (error naming both); refuses gif format (`-b:v` is verified meaningless for palette output) and picture inputs; fails fast before the start notification on missing value, unparseable size, or duration-probe failure
 
 ## v3 Requirements
 
@@ -48,12 +48,12 @@ Deferred to a future milestone. Tracked but not in the current roadmap.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SIZE-10 | 8 | Pending |
-| SIZE-13 | 8 | Pending |
-| SIZE-14 | 8 | Pending |
-| SIZE-15 | 8 | Pending |
+| SIZE-10 | 8 | Complete |
+| SIZE-13 | 8 | Complete |
+| SIZE-14 | 8 | Complete |
+| SIZE-15 | 8 | Complete |
 | MENU-02 | 9 | Pending |
-| SAFE-02 | 8 | Pending |
+| SAFE-02 | 8 | Complete |
 
 **Coverage:**
 
