@@ -432,7 +432,7 @@ transcode_video_target() {
   # inert too, but if names the intent.
   if [[ $notify_id =~ ^[0-9]+$ ]]; then
     omarchy-notification-send -r "$notify_id" -g  "Transcoding video…" \
-      "${desc:-$(basename -- "$input") to mp4 ($resolution}, pass 2/2)"
+      "${desc:-$(basename -- "$input") to mp4 ($resolution}, pass 2/2)" || true
   fi
 
   ffmpeg -i "$input" -vf "$scale" -c:v "$codec" -preset "$preset" \
