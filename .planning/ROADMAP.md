@@ -67,9 +67,9 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 **Canonical refs:** `.planning/research/ARCHITECTURE.md` (sentinel/prefix contract, input-mode quirks), `.planning/research/PITFALLS.md` (pitfalls 8, 11), `bin/omarchy-menu-input`, `bin/omarchy-transcode`, `shell/plugins/menu/Menu.qml` (input mode, already shipped)
 
-**Plans**: 1 plan (anticipated)
+**Plans**: 1 plan
 
-- [ ] 09-01: mp4-only sentinel row + `omarchy-menu-input` handoff + `target:` return contract + re-prompt-once-then-cancel + `omarchy-menu-input` stub + interactive-parity assertions (Custom row ≡ `--target` argv)
+- [ ] 09-01-PLAN.md — mp4-only sentinel row + `omarchy-menu-input` handoff + `target:` return contract + re-prompt-once-then-cancel + `omarchy-menu-input` stub + interactive-parity assertions (Custom row ≡ `--target` argv) — one atomic commit
 
 ## Progress
 
