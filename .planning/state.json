@@ -15,9 +15,9 @@
     }
   ],
   "next": {
-    "command": "/gsd-progress --next",
-    "label": "Advance to the next step (verify)",
-    "reason": "Phase 08 of 2 · ready to verify"
+    "command": "/gsd-new-milestone",
+    "label": "Start the next milestone (or push the stacked upstream PR)",
+    "reason": "Milestone v1.2 complete — all phases verified and UAT-passed"
   },
   "updated_at": "2026-09-17T01:05:00.345Z"
 }

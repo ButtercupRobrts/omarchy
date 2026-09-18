@@ -3,11 +3,11 @@ gsd_state_version: "1.0"
 milestone: v1.2
 current_phase: 09
 current_phase_name: Interactive Custom size… row
-status: securing
-stopped_at: Phase 9 verified + UAT passed; security gate next
+status: milestone_complete
+stopped_at: v1.2 archived; stacked PR branch carved
 last_updated: "2026-09-18T00:00:00.000Z"
 last_activity: 2026-09-18
-last_activity_desc: Phase 9 UAT passed; decimal-units fix 4d422ffe landed
+last_activity_desc: v1.2 milestone archived; feat/transcode-target-size-upstream ready for upstream
 state_head: 2e4cab25d4e8b22ef859bc741690b104cb0057dc
 progress:
   total_phases: 2
@@ -118,10 +118,18 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 | Category | Item | Status | Deferred At | Milestone |
 |----------|------|--------|-------------|-----------|
-| *(none)* | | | | |
+| uat_gaps | 08/08-UAT.md | passed | 2026-09-18 | v1.2 |
+| uat_gaps | 09/09-UAT.md | passed | 2026-09-18 | v1.2 |
+| deferred_items | 08: trap comment `-d` guard wording | acknowledged (cosmetic) | 2026-09-18 | v1.2 |
+| deferred_items | 08: stub pass-2 `out=` ordering fidelity | acknowledged (optional) | 2026-09-18 | v1.2 |
+| deferred_items | 08: gif+`--target` wastes a resolution prompt | acknowledged (locked ordering) | 2026-09-18 | v1.2 |
+| deferred_items | 08: retry `mv -f` TOCTOU | acknowledged (accepted risk) | 2026-09-18 | v1.2 |
+| deferred_items | 09: mint-guard `return 1` vs flag `return 2` | acknowledged (unreachable, cosmetic) | 2026-09-18 | v1.2 |
+| deferred_items | 09: `192k` constant across 5 sites | acknowledged (extract post-merge) | 2026-09-18 | v1.2 |
+| deferred_items | 09: `(rate)×duration×125` formula duplicated | acknowledged (dedupe post-merge) | 2026-09-18 | v1.2 |
 
 ## Session Continuity
 
-Last session: 2026-09-17T12:25:00.000Z
-Stopped at: Completed 09-01-PLAN.md
+Last session: 2026-09-18T00:00:00.000Z
+Stopped at: v1.2 milestone archived — next step is /gsd-new-milestone or upstream PR work
 Resume file: None

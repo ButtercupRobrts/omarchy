@@ -2,24 +2,17 @@
 
 ## What This Is
 
-A personal fork of Omarchy (`omacom/omarchy` → `ButtercupRobrts/omarchy`) used for developing fixes against the live system and potentially upstreaming them. Shipped: per-monitor display scaling (v1.0, phases 1–3) and transcode quality selection + size feedback in `omarchy-transcode` (v1.1, phases 4–7).
+A personal fork of Omarchy (`omacom/omarchy` → `ButtercupRobrts/omarchy`) used for developing fixes against the live system and potentially upstreaming them. Shipped: per-monitor display scaling (v1.0, phases 1–3), transcode quality selection + size feedback in `omarchy-transcode` (v1.1, phases 4–7), and target-size transcoding (v1.2, phases 8–9).
 
 ## Current State
 
-**v1.1 shipped 2026-09-16** — `omarchy-transcode` now offers high/medium/low quality tiers (mp4 CRF, gif fps) interactively with `~N MB` estimates and as a 4th positional arg, and the completion notification reports the actual output size. `medium` preserves prior encoder flags byte-for-byte; pictures are unchanged. Milestone audit: 7/7 requirements, `.planning/v1.1-MILESTONE-AUDIT.md`.
+**v1.2 shipped 2026-09-18** — `omarchy-transcode` now accepts `--target <size>` (free-text: `25M`, `1.5G`, `500K`, `25MB`, bare `25` = MB) for video: bitrate derived from probed duration minus 192k audio, resolution auto-step-down across locked floors, two-pass encode, one overshoot retry, honest refusal naming the achievable minimum — plus a `Custom size…` row on the mp4 quality menu routing through the identical pipeline (interactive ≡ CLI byte-identical). All user-facing sizes are decimal MB, matching file managers and upload limits.
 
-## Current Milestone: v1.2 Target-Size Transcode
-
-**Goal:** Let the user name a target output size (`--target 25M`) and have the tool derive the best parameters that fit — bitrate from duration, resolution stepped down when the budget is too tight — instead of picking a quality tier and hoping.
-
-**Target features:**
-- `--target <size>` flag for video transcodes: two-pass encode with bitrate derived from probed duration minus audio, resolution auto-step-down on insufficient budget, honest refusal below every floor
-- A `Custom size…` row in the interactive quality menu (Menu.qml input mode) so the same capability is reachable without a terminal
-- gif refuses `--target` (palette output doesn't respond to bitrate); pictures unchanged
+**v1.1 shipped 2026-09-16** — quality tiers (mp4 CRF, gif fps) interactively with `~N MB` estimates and as a 4th positional arg; completion notification reports actual output size. Milestone audit: 7/7 requirements, `.planning/v1.1-MILESTONE-AUDIT.md`.
 
 ## Next Milestone Goals
 
-Remaining candidates tracked in `.planning/milestones/v1.1-REQUIREMENTS.md`: intent presets (SIZE-11), gif estimates (SIZE-12), picture quality arg (QUAL-10), Nautilus batch-answer memory (QUAL-11). Upstream PR #12135 (v1.1 change set) is open — v2's upstream branch gets carved after it resolves, per the additive-layering rule.
+Remaining candidates tracked in `.planning/milestones/v1.2-REQUIREMENTS.md`: intent presets (SIZE-11), gif estimates (SIZE-12), picture quality arg (QUAL-10), Nautilus batch-answer memory (QUAL-11), sub-720p rungs (SIZE-16), deeper overshoot convergence (SIZE-17). Upstream: PR #12135 (v1.1 change set) is open; the stacked v1.2 branch `feat/transcode-target-size-upstream` is carved and ready — it goes upstream once #12135 resolves.
 
 ## Requirements
 
