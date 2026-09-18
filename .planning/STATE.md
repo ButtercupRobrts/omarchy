@@ -3,15 +3,15 @@ gsd_state_version: "1.0"
 milestone: v1.2
 current_phase: 09
 current_phase_name: Interactive Custom size… row
-status: verifying
-stopped_at: Completed 09-01-PLAN.md
-last_updated: "2026-09-17T12:25:00.000Z"
-last_activity: 2026-09-17
-last_activity_desc: Completed 09-01-PLAN.md
+status: securing
+stopped_at: Phase 9 verified + UAT passed; security gate next
+last_updated: "2026-09-18T00:00:00.000Z"
+last_activity: 2026-09-18
+last_activity_desc: Phase 9 UAT passed; decimal-units fix 4d422ffe landed
 state_head: 2e4cab25d4e8b22ef859bc741690b104cb0057dc
 progress:
   total_phases: 2
-  completed_phases: 0
+  completed_phases: 2
   total_plans: 1
   completed_plans: 1
 milestone_name: Target-Size Transcode

@@ -6,12 +6,12 @@
     {
       "number": "8",
       "name": "Non-interactive `--target` size targeting",
-      "status": "pending"
+      "status": "complete"
     },
     {
       "number": "9",
       "name": "Interactive `Custom size…` row",
-      "status": "pending"
+      "status": "complete"
     }
   ],
   "next": {

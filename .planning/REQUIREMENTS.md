@@ -16,7 +16,7 @@ Requirements for this milestone. Each maps to roadmap phases.
 
 ### Interactive
 
-- [ ] **MENU-02**: The mp4 quality menu gains a `Custom size…` row → opens `omarchy-menu-input` for free-text entry → parsed by the same size parser → feeds the same target path; empty or unparseable input re-prompts once, then cancels cleanly (empty submit is exit-0-with-empty, not a cancel)
+- [x] **MENU-02**: The mp4 quality menu gains a `Custom size…` row → opens `omarchy-menu-input` for free-text entry → parsed by the same size parser → feeds the same target path; empty or unparseable input re-prompts once, then cancels cleanly (empty submit is exit-0-with-empty, not a cancel)
 
 ### Safety / Refusals
 
@@ -52,7 +52,7 @@ Deferred to a future milestone. Tracked but not in the current roadmap.
 | SIZE-13 | 8 | Complete |
 | SIZE-14 | 8 | Complete |
 | SIZE-15 | 8 | Complete |
-| MENU-02 | 9 | Pending |
+| MENU-02 | 9 | Complete |
 | SAFE-02 | 8 | Complete |
 
 **Coverage:**
