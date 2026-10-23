@@ -114,10 +114,9 @@ omarchy plugin remove acme.weather
 
 > ⚠️ **Plugins run as unsandboxed code inside `omarchy-shell`.** Adding warns you before cloning, plugins land disabled so you can review the code before enabling, and updates show a diff of the changes before touching anything. The scoped QML interfaces remove direct authentication-service and generic replacement-bar service lookups, but visual plugins still share and can traverse the ordinary host scene. Only add repos whose code you are willing to run.
 
-Each command is **interactive** when run bare in a terminal (gum pickers,
-confirmation, a diff to review) and fully **non-interactive** when given
-arguments. Pass `--yes` to skip every prompt — this is the path for scripts and
-AI agents:
+Add, update, and remove commands confirm in a terminal even when given
+arguments; without a terminal they refuse rather than guess. Pass `--yes` to
+skip every prompt — this is the path for scripts and AI agents:
 
 ```bash
 omarchy plugin add https://github.com/acme/omarchy-weather.git --enable --yes

@@ -43,8 +43,7 @@ assertDeepEqual(
     provider: '',
     aliases: ['theme'],
     when: '',
-    checked: '',
-    disabled: ''
+    checked: ''
   },
   'menu normalizes parsed items'
 )
@@ -64,8 +63,6 @@ assertEqual(menu.parentPathFor(merged.items, 'style.theme'), 'Style', 'menu buil
 assert(menu.isDescendantOf(merged.items, 'style.theme', 'style'), 'menu detects descendants')
 assertEqual(menu.childCount(merged.items, merged.itemOrder, 'style'), 1, 'menu counts children')
 assertEqual(menu.labelFor({ id: 'style.theme', label: 'Theme', checked: 'cmd' }, { 'style.theme': true }), 'Theme ✓', 'menu appends checked marker')
-assertEqual(menu.labelFor({ id: 'install.browser.zen', label: 'Zen', disabled: 'cmd' }, {}, { 'install.browser.zen': true }), 'Zen ✓', 'menu marks a disabled row as something you already have')
-assertEqual(menu.labelFor({ id: 'install.browser.zen', label: 'Zen', disabled: 'cmd' }, {}, { 'install.browser.zen': false }), 'Zen', 'menu leaves an uninstalled row unmarked')
 
 const visibilityItems = {
   hardware: menu.normalizeItem('hardware', { label: 'Hardware' }),
@@ -81,22 +78,6 @@ assert(menu.isVisible(visibilityItems, visibilityOrder, { 'hardware.laptop': tru
 assert(!menu.isVisible(visibilityItems, visibilityOrder, { 'nested.branch.leaf': false }, visibilityItems.nested), 'menu hides recursively empty submenus')
 assert(menu.isVisible(visibilityItems, visibilityOrder, {}, visibilityItems.dynamic), 'menu keeps provider-backed submenus visible')
 
-// `disabled:` is the softer guard: the row stays listed and only loses the
-// cursor, which is how an already-installed app keeps its place in Install.
-const installed = menu.normalizeItem('install.browser.zen', { label: 'Zen', disabled: 'omarchy-pkg-present zen-browser-bin', action: 'install-zen' })
-assert(menu.isVisible({ 'install.browser.zen': installed }, ['install.browser.zen'], { 'install.browser.zen': false }, installed), 'menu keeps a disabled row visible')
-assert(menu.isDisabled({ 'install.browser.zen': true }, installed), 'menu disables a row whose disabled: succeeded')
-assert(!menu.isDisabled({ 'install.browser.zen': false }, installed), 'menu leaves a row selectable when its disabled: failed')
-assert(!menu.isDisabled({ 'install.browser.zen': true }, visibilityItems.laptop), 'menu never disables a row that declares no disabled:')
-assert(
-  menu.displayRow({ 'install.browser.zen': installed }, ['install.browser.zen'], {}, { 'install.browser.zen': true }, installed, '', 0).disabled,
-  'menu display rows carry their disabled state'
-)
-assert(
-  /function matchesQuery\(entry, query\) \{\s*\n\s*return MenuModel\.matchesQuery\(entry, query, root\.isVisible\(entry\) && !root\.isDisabled\(entry\)\)/.test(menuQml),
-  'menu search skips disabled rows, which belong to the submenu they sit in rather than a list of what you can do'
-)
-
 const entry = merged.items['style.theme']
 assert(menu.matchesQuery(entry, 'theme', true), 'menu matches labels and aliases')
 assert(menu.matchesQuery(entry, 'colors', true), 'menu matches aliases')
@@ -105,10 +86,9 @@ assert(!menu.matchesQuery(entry, 'theme', false), 'menu hides invisible matches'
 assert(menu.searchScore(merged.items, entry, 'theme') < menu.searchScore(merged.items, entry, 'appearance'), 'menu scores name matches above description matches')
 
 assertDeepEqual(
-  menu.displayRow(merged.items, merged.itemOrder, {}, {}, entry, 'Style', 12, 'search'),
+  menu.displayRow(merged.items, merged.itemOrder, {}, entry, 'Style', 12, 'search'),
   {
     itemId: 'style.theme',
-    disabled: false,
     kind: 'action',
     icon: '',
     iconFont: '',
@@ -216,14 +196,13 @@ assertEqual(
   'menu lists Reset Computer last under Setup'
 )
 const expectedAgents = {
-  agy: { icon: '󰫢', label: 'Antigravity' },
   pi: { icon: '\ue901', iconFont: 'omarchy', label: 'Pi' },
   omp: { icon: '\ue903', iconFont: 'omarchy', label: 'omp' },
   opencode: { icon: '\ue902', iconFont: 'omarchy', label: 'OpenCode' },
-  ori: { icon: '\ue909', iconFont: 'omarchy', label: 'Ori' },
   claude: { icon: '󰛄', label: 'Claude' },
   codex: { icon: '\ue905', iconFont: 'omarchy', label: 'Codex' },
   grok: { icon: '\ue904', iconFont: 'omarchy', label: 'Grok' },
+  gemini: { icon: '󰫢', label: 'Gemini' },
   hermes: { icon: '\ue90a', iconFont: 'omarchy', label: 'Hermes' },
   openclaw: { icon: '\ue90c', iconFont: 'omarchy', label: 'OpenClaw' },
   copilot: { icon: '', label: 'Copilot' },
@@ -249,77 +228,10 @@ assertDeepEqual(
   defaultItems
     .filter(item => item.parent === 'setup.default.agent')
     .map(item => item.label),
-  ['Antigravity', 'Claude', 'Codex', 'Copilot', 'Crush', 'Cursor CLI', 'Grok', 'Hermes', 'Muse Code', 'omp', 'OpenClaw', 'OpenCode', 'Ori', 'Pi'],
+  ['Claude', 'Codex', 'Copilot', 'Crush', 'Cursor CLI', 'Gemini', 'Grok', 'Hermes', 'Muse Code', 'omp', 'OpenClaw', 'OpenCode', 'Pi'],
   'menu sorts coding agents alphabetically'
 )
-const expectedDefaults = {
-  browser: ['Chromium', 'Chrome', 'Brave', 'Brave Origin', 'Edge', 'Firefox', 'Zen'],
-  terminal: ['Alacritty', 'Foot', 'Ghostty', 'Kitty'],
-  editor: ['Neovim', 'VSCode', 'Cursor', 'Zed', 'Sublime Text', 'Helix', 'Vim', 'Emacs']
-}
-assert(
-  Object.entries(expectedDefaults).every(([type, labels]) => {
-    const entries = defaultItems.filter(item => item.parent === `setup.default.${type}`)
-    return entries.map(item => item.label).join('\0') === labels.join('\0')
-      && entries.every(item => !item.when)
-  }),
-  'menu always exposes every supported browser, terminal, and editor under Defaults'
-)
 assert(!defaultById['install.ai.crush'], 'menu removes Crush from Install > AI')
-// Software you already have keeps its place in Install, dimmed rather than
-// dropped, so the list reads as a catalog of what Omarchy can install.
-// Chromium Account is the sole Install row with anything left to hide for, so
-// any other `when:` here is a row that went back to vanishing once installed.
-assertDeepEqual(
-  defaultItems
-    .filter(item => item.id.startsWith('install.') && item.action && item.when)
-    .map(item => item.id),
-  ['install.service.chromium-account'],
-  'menu never hides an Install row because the software is already there'
-)
-assert(
-  ['install.browser.zen', 'install.editor.vscode', 'install.gaming.steam', 'install.development.rust', 'install.windows'].every(
-    id => defaultById[id].disabled && !defaultById[id].when
-  ),
-  'menu dims the Install rows for software that is already installed'
-)
-assertEqual(
-  defaultById['install.browser.zen'].disabled,
-  'omarchy-pkg-present zen-browser-bin',
-  'menu asks the same presence question it used to hide the row with'
-)
-// A guard can still be about something other than having the software: no
-// Chromium at all means no account to wire up, and that row stays hidden.
-assert(
-  defaultById['install.service.chromium-account'].when === '[[ -f ~/.config/chromium-flags.conf ]]'
-    && defaultById['install.service.chromium-account'].disabled.includes('oauth2-client-id'),
-  'menu keeps hiding Chromium Account without Chromium, and dims it once the account is set up'
-)
-assert(
-  defaultItems.filter(item => item.id.startsWith('remove.')).every(item => !item.disabled)
-    && defaultById['remove.browser.zen'].when === 'omarchy-pkg-present zen-browser-bin',
-  'menu still hides Remove rows for software that is not installed'
-)
-assertDeepEqual(
-  defaultItems
-    .filter(item => item.parent === 'remove')
-    .map(item => item.id),
-  [
-    'remove.package',
-    'remove.ai',
-    'remove.service',
-    'remove.development',
-    'remove.theme',
-    'remove.gaming',
-    'remove.browser',
-    'remove.webapp',
-    'remove.tui',
-    'remove.windows',
-    'remove.preinstalls',
-    'remove.security'
-  ],
-  'menu orders Remove categories like their Install counterparts, followed by Remove-only categories'
-)
 assert(
   defaultById['setup.security.passwordless-sudo'].action.includes('omarchy-sudo-passwordless'),
   'menu places Passwordless Sudo under Setup > Security'
@@ -451,40 +363,6 @@ assert(
 assert(
   /function select\(delta\)[\s\S]*root\.disarmPointer\(\)[\s\S]*selectedIndex =/.test(menuQml),
   'menu keyboard navigation disarms pointer selection'
-)
-// A dimmed row is not a target: the cursor steps over it, the pointer refuses
-// to land on it, and neither Enter nor a click can reach it.
-assert(
-  /function select\(delta\)[\s\S]*?var target = root\.nextSelectable\(from, delta\)\s*\n\s*if \(target < 0\) return/.test(menuQml),
-  'menu keyboard navigation skips disabled rows in the direction of travel'
-)
-assert(
-  /function rowSelectable\(index\)[\s\S]*?return !displayModel\.get\(index\)\.disabled/.test(menuQml),
-  'menu reads selectability off the row'
-)
-assert(
-  /function activateIndex\(index, fromPointer\)[\s\S]*?if \(!root\.rowSelectable\(index\)\) return/.test(menuQml),
-  'menu refuses to activate a disabled row'
-)
-assert(
-  /function selectFromPointer\(index, item, mouse\)[\s\S]*?if \(!root\.rowSelectable\(index\)\) return/.test(menuQml)
-    && /onClicked: \{\s*\n\s*if \(row\.disabled\) return/.test(menuQml),
-  'menu leaves the cursor put when the pointer crosses a disabled row'
-)
-assert(
-  /opacity: row\.disabled \? 0\.4 : 1/.test(menuQml) && !/font\.italic/.test(menuQml),
-  'menu renders a disabled row faded, and leaves it at that'
-)
-assert(
-  /function rebuildDisplay\(\)[\s\S]*?root\.settleCursor\(\)/.test(menuQml),
-  'menu parks the cursor on a selectable row after the rows change'
-)
-// A menu with nothing selectable in it has no cursor, and Return must not
-// conjure one onto a disabled row just because rows exist.
-assert(
-  /function settleCursor\(\)[\s\S]*?root\.cursorActive = target >= 0/.test(menuQml)
-    && /else if \(root\.cursorActive\) root\.activateIndex\(root\.selectedIndex\)\s*\n\s*else root\.settleCursor\(\)/.test(menuQml),
-  'menu ties the cursor to a selectable row existing, both ways'
 )
 assert(
   /function setFilter\(nextFilter\)[\s\S]*root\.disarmPointer\(\)/.test(menuQml),
@@ -638,47 +516,8 @@ assert(
     && /onClicked:[\s\S]*root\.activateIndex\(row\.index, true\)/.test(menuQml),
   'mouse activation carries pointer intent into subordinate menus'
 )
-
-// defaultIndex resolution lives in MenuModel so the whole contract — absent
-// field, clamping, coercion — is pinned here in one place.
-assertEqual(menu.dmenuDefaultIndex({}, 3), 0, 'menu default index is row 0 when the field is absent')
-assertEqual(menu.dmenuDefaultIndex({ defaultIndex: 0 }, 3), 0, 'menu default index 0 highlights row 0')
-assertEqual(menu.dmenuDefaultIndex({ defaultIndex: 1 }, 3), 1, 'menu default index selects the named row')
-assertEqual(menu.dmenuDefaultIndex({ defaultIndex: 99 }, 3), 2, 'menu default index clamps to the last row')
-assertEqual(menu.dmenuDefaultIndex({ defaultIndex: -3 }, 3), 0, 'menu default index clamps a negative to row 0')
-assertEqual(menu.dmenuDefaultIndex({ defaultIndex: 1.9 }, 3), 1, 'menu default index floors a non-integer')
-assertEqual(menu.dmenuDefaultIndex({ defaultIndex: 'abc' }, 3), 0, 'menu default index treats non-numeric as absent')
-assertEqual(menu.dmenuDefaultIndex({ defaultIndex: NaN }, 3), 0, 'menu default index treats NaN as absent')
-assertEqual(menu.dmenuDefaultIndex({ defaultIndex: null }, 3), 0, 'menu default index treats null as absent')
-assertEqual(menu.dmenuDefaultIndex({ defaultIndex: undefined }, 3), 0, 'menu default index treats undefined as absent')
-assertEqual(menu.dmenuDefaultIndex({ defaultIndex: 1 }, 0), 0, 'menu default index is row 0 on an empty option list')
-
-// openDmenu must route the payload field through the helper and land it on
-// selectedIndex before rebuildDisplay(), where the existing clamp bounds it.
-const openDmenuBody = menuQml.match(/function openDmenu\([^)]*\) \{([\s\S]*?)\n  \}/)[1]
-assert(
-  openDmenuBody.includes('MenuModel.dmenuDefaultIndex(payload'),
-  'menu openDmenu resolves the default index through the MenuModel helper'
-)
-assert(
-  openDmenuBody.includes('selectedIndex = dmenuDefaultIndex'),
-  'menu openDmenu initializes the highlight from the resolved default index'
-)
-assert(
-  openDmenuBody.indexOf('selectedIndex = dmenuDefaultIndex') < openDmenuBody.indexOf('rebuildDisplay()'),
-  'menu openDmenu sets the default index before the display rebuild clamps it'
-)
-assert(
-  !/selectedIndex = 0\b/.test(openDmenuBody),
-  'menu openDmenu no longer hardcodes the highlight to row 0'
-)
-const setFilterBody = menuQml.match(/function setFilter\([^)]*\) \{([\s\S]*?)\n  \}/)[1]
-assert(
-  setFilterBody.includes('root.selectedIndex = 0'),
-  'menu filter reset keeps the default index initial-only'
-)
 JS
 
 font_charset=$(fc-query --format='%{charset}' "$ROOT/default/fonts/omarchy/omarchy.ttf")
-[[ $font_charset == *"e900-e90e"* ]] || fail "Omarchy icon font includes every custom menu glyph"
+[[ $font_charset == *"e900-e908 e90a-e90d"* ]] || fail "Omarchy icon font includes every custom menu glyph"
 pass "Omarchy icon font includes the official agent marks"

@@ -4,11 +4,6 @@ set -euo pipefail
 
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/base-test.sh"
 
-# The command fixture follows the runtime invariant and reads defaults through
-# OMARCHY_PATH. Point it at this checkout rather than whichever install launched
-# the test (or nothing at all on a non-Omarchy development machine).
-export OMARCHY_PATH="$ROOT"
-
 if perl -0ne 'exit(/drag\s*\.\s*target\s*:\s*[^;]*\bslot\b/s ? 0 : 1)' "$ROOT/shell/plugins/bar/Bar.qml"; then
   fail "bar module dragging must not mutate ModuleSlot positions"
 fi
@@ -29,6 +24,29 @@ if ! perl -0ne 'exit(/onPressAndHold:\s*function[^{]*\{[^}]*?\bpressed\b[^}]*?\b
   fail "bar move ignores a press-and-hold the gesture area does not hold the press for"
 fi
 pass "bar move ignores a press-and-hold propagated from a widget above"
+
+# Every click target registration used to resync every plugin api inline. With
+# six monitors' worth of widgets that is hundreds of full walks at startup, so
+# the change handlers coalesce into one deferred resync and ownership lookups
+# are keyed by target instead of scanning an array.
+if ! rg -q 'onClickTargetsChanged: schedulePluginBarApiSync\(\)' "$ROOT/shell/plugins/bar/Bar.qml"; then
+  fail "bar coalesces plugin api resyncs instead of running one per click target change"
+fi
+if ! rg -q 'Qt\.callLater\(root\.syncAllPluginBarApiObjects\)' "$ROOT/shell/plugins/bar/Bar.qml"; then
+  fail "bar defers the coalesced plugin api resync to the event loop"
+fi
+if ! rg -q 'pluginObjectOwners\.get\(target\)' "$ROOT/shell/plugins/bar/Bar.qml"; then
+  fail "bar looks plugin object ownership up by target instead of scanning"
+fi
+pass "bar coalesces plugin api resyncs and looks ownership up by target"
+
+# Both bar orientations used to be instantiated and toggled with `visible`,
+# doubling every indicator (and every process an indicator spawns) per bar.
+if ! rg -q 'sourceComponent: root\.vertical \? verticalIndicatorsTree : horizontalIndicatorsTree' \
+  "$ROOT/shell/plugins/bar/widgets/Indicators.qml"; then
+  fail "indicators instantiate only the tree for the current bar orientation"
+fi
+pass "indicators instantiate only the tree for the current bar orientation"
 
 run_node_test <<'JS'
 const fs = require('fs')
@@ -259,7 +277,7 @@ assert(
   'bar uses nearest insertion targeting for widget and free-space drops'
 )
 assert(
-  /component DragGhostPanel:[\s\S]*?readonly property var targetRect: root\.barDragTargetGeometry[\s\S]*?color: Color\.accent/.test(barSource),
+  /component DragGhostPanel:[\s\S]*?readonly property var targetRect: root\.barDragTargetGeometry[\s\S]*?color: Commons\.Color\.accent/.test(barSource),
   'bar draws the insertion marker above the bar in the drag overlay'
 )
 

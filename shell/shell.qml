@@ -1,9 +1,11 @@
+//@ pragma OmarchyLoadPatch
 import QtQuick
 import QtQml.Models
 import Quickshell
 import Quickshell.Io
 
 import qs.Commons
+import qs.Commons as Commons
 
 import "plugins/bar"
 import "services"
@@ -317,7 +319,8 @@ ShellRoot {
     if (!manifest) return null
     if (manifest.__isFirstParty) return manifest
     var copy = JSON.parse(JSON.stringify(manifest))
-    delete copy.__sourceDir
+    // Keep __sourceDir: third-party plugins find their bundled scripts through it.
+    // Only the host trust markers are withheld.
     delete copy.__isFirstParty
     delete copy.__hostCapabilities
     return copy
@@ -353,6 +356,12 @@ ShellRoot {
 
   function pluginHasBarCapabilities(manifest) {
     return shell.manifestHasKind(manifest, "bar")
+  }
+
+  function pluginIsIndicatorsClone(manifest) {
+    var metadata = manifest && Util.isPlainObject(manifest.omarchy) ? manifest.omarchy : null
+    return shell.manifestHasKind(manifest, "bar-widget")
+      && !!metadata && String(metadata.clonedFrom || "") === "omarchy.indicators"
   }
 
   function publicIdleConfigFor(manifest) {
@@ -519,6 +528,7 @@ ShellRoot {
     return [
       allowOwnService ? "own-service" : "no-own-service",
       barCapabilities ? "bar" : "no-bar",
+      allowOwnService && shell.pluginIsIndicatorsClone(manifest) ? "indicators" : "no-indicators",
       shell.manifestHasKind(manifest, "menu") ? "menu" : "no-menu"
     ].join("|")
   }
@@ -582,12 +592,13 @@ ShellRoot {
     // makes QML re-enter the binding and report a loop on the caller's service
     // property, even though the resulting proxy is otherwise acyclic.
     var firstPartyServices = ({})
-    if (barCapabilities) {
-      var serviceIds = ["omarchy.idle", "omarchy.media", "omarchy.nightlight", "omarchy.notifications"]
-      for (var i = 0; i < serviceIds.length; i++) {
-        var serviceId = serviceIds[i]
-        firstPartyServices[serviceId] = shell.pluginFirstPartyServiceFor(cacheKey, key, serviceId)
-      }
+    var serviceIds = barCapabilities
+      ? ["omarchy.idle", "omarchy.media", "omarchy.nightlight", "omarchy.notifications"]
+      : (allowOwnService && shell.pluginIsIndicatorsClone(manifest)
+        ? ["omarchy.idle", "omarchy.nightlight", "omarchy.notifications"] : [])
+    for (var i = 0; i < serviceIds.length; i++) {
+      var serviceId = serviceIds[i]
+      firstPartyServices[serviceId] = shell.pluginFirstPartyServiceFor(cacheKey, key, serviceId)
     }
 
     var api = pluginShellApiComponent.createObject(null, {
@@ -603,7 +614,14 @@ ShellRoot {
       _firstPartyServiceLookup: function(requestedId) {
         if (allowOwnService && shell.pluginOwnsTarget(key, requestedId))
           return shell.pluginServiceFor(key, requestedId)
-        return hasCurrentBarCapabilities() ? (firstPartyServices[requestedId] || null) : null
+        // Indicators clones have no service of their own. Under the trusted
+        // bar they need only these prebuilt non-authentication proxies, not
+        // full-bar capabilities or access to another plugin's live service.
+        var indicatorsAllowed = allowOwnService && shell.pluginIsIndicatorsClone(currentManifest())
+          && shell.activeBarManifest && shell.activeBarManifest.__isFirstParty
+          && shell.pluginRegistry.isEnabled(key) && shell.barEntryConfigured(key)
+        return hasCurrentBarCapabilities() || indicatorsAllowed
+          ? (firstPartyServices[requestedId] || null) : null
       },
       _barEntryShellLookup: function(ownerId, moduleName) {
         return hasCurrentBarCapabilities()
@@ -867,10 +885,6 @@ ShellRoot {
     for (var entryKey in _pluginBarEntryShellApis)
       _pluginBarEntryShellApis[entryKey].barConfig = shell.publicBarConfig()
   }
-
-  // Reassigned as each service registers, so a binding that reads this before
-  // looking a service up by id re-evaluates once that service exists.
-  readonly property var services: _services
 
   function serviceFor(pluginId) {
     return _services[String(pluginId)] || null
@@ -1583,8 +1597,8 @@ ShellRoot {
       var shellRaw = ""
       try { colorsRaw = Qt.atob(String(colorsB64 || "")) } catch (e) { colorsRaw = "" }
       try { shellRaw = Qt.atob(String(shellB64 || "")) } catch (e2) { shellRaw = "" }
-      Color.loadColors(colorsRaw)
-      Color.loadShell(shellRaw)
+      Commons.Color.loadColors(colorsRaw)
+      Commons.Color.loadShell(shellRaw)
       Style.scheduleRefresh()
       return "ok"
     }

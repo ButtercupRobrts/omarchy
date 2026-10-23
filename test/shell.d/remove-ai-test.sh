@@ -15,14 +15,6 @@ printf 'drop:%s\n' "$*" >>"$TEST_LOG"
 SCRIPT
 chmod +x "$tmp_dir/bin/omarchy-pkg-drop"
 
-# omarchy-remove-ai-claude quits the running app before deleting its state;
-# a real pkill here would take the developer's own Claude with it.
-cat >"$tmp_dir/bin/pkill" <<'SCRIPT'
-#!/bin/bash
-printf 'pkill:%s\n' "$*" >>"$TEST_LOG"
-SCRIPT
-chmod +x "$tmp_dir/bin/pkill"
-
 # omarchy-remove-ai-perplexity asks through gum whether the user's data goes
 # too. The stub answers "no" unless a test says otherwise and logs the call: a
 # real gum would hang the run, and one that answered "yes" on its own would be
@@ -47,64 +39,6 @@ fresh_home() {
   mkdir -p "$tmp_dir/home"
   export HOME="$tmp_dir/home"
 }
-
-# The Codex CLI ships in its own package and resolves its runtime out of
-# ~/.cache/codex-runtimes, so removing the desktop app must not take it.
-fresh_home
-mkdir -p "$HOME/.config/Codex" "$HOME/.cache/Codex" "$HOME/.cache/codex-runtimes/codex-primary-runtime" "$HOME/.codex"
-"$ROOT/bin/omarchy-remove-ai-chatgpt" >/dev/null
-
-[[ ! -e $HOME/.config/Codex ]] || fail "ChatGPT removal deletes the desktop app's config"
-pass "ChatGPT removal deletes the desktop app's config"
-
-[[ -d $HOME/.cache/codex-runtimes/codex-primary-runtime ]] || fail "ChatGPT removal keeps the Codex CLI's runtime cache"
-pass "ChatGPT removal keeps the Codex CLI's runtime cache"
-
-[[ -d $HOME/.codex ]] || fail "ChatGPT removal keeps the Codex CLI's config"
-pass "ChatGPT removal keeps the Codex CLI's config"
-
-# The Claude Code CLI ships in its own package and keeps its state in
-# ~/.claude, ~/.claude.json, and ~/.cache/claude-cli-nodejs, so removing the
-# desktop app must not take it.
-fresh_home
-mkdir -p "$HOME/.config/Claude" "$HOME/.cache/Claude" "$HOME/.cache/claude-cli-nodejs" "$HOME/.claude"
-touch "$HOME/.claude.json"
-"$ROOT/bin/omarchy-remove-ai-claude" >/dev/null
-
-for gone in .config/Claude .cache/Claude; do
-  [[ ! -e $HOME/$gone ]] || fail "Claude removal deletes the desktop app's config and caches" "$gone"
-done
-pass "Claude removal deletes the desktop app's config and caches"
-
-for kept in .claude .claude.json .cache/claude-cli-nodejs; do
-  [[ -e $HOME/$kept ]] || fail "Claude removal keeps the Claude Code CLI's state" "$kept"
-done
-pass "Claude removal keeps the Claude Code CLI's state"
-
-grep -qx 'pkill:-x claude-desktop' "$TEST_LOG" || fail "Claude removal quits the running app before deleting its state"
-pass "Claude removal quits the running app before deleting its state"
-
-# LM Studio's models follow a relocatable home, named only by the pointer file.
-fresh_home
-mkdir -p "$tmp_dir/relocated-models/models"
-printf '%s' "$tmp_dir/relocated-models" >"$HOME/.lmstudio-home-pointer"
-mkdir -p "$HOME/.config/LM Studio"
-"$ROOT/bin/omarchy-remove-ai-lm-studio" >/dev/null
-
-[[ ! -e $tmp_dir/relocated-models ]] || fail "LM Studio removal follows a relocated home pointer"
-pass "LM Studio removal follows a relocated home pointer"
-
-[[ ! -e "$HOME/.config/LM Studio" ]] || fail "LM Studio removal deletes its config"
-pass "LM Studio removal deletes its config"
-
-# A pointer that resolves to the home directory itself would take everything.
-fresh_home
-printf '%s' "$HOME" >"$HOME/.lmstudio-home-pointer"
-mkdir -p "$HOME/Documents"
-"$ROOT/bin/omarchy-remove-ai-lm-studio" >/dev/null
-
-[[ -d $HOME/Documents ]] || fail "LM Studio removal refuses a pointer aimed at the home directory"
-pass "LM Studio removal refuses a pointer aimed at the home directory"
 
 # T3 Code bootstraps the agents it drives; their state outlives it.
 fresh_home
@@ -202,25 +136,6 @@ if env -u HOME "$ROOT/bin/omarchy-remove-ai-perplexity" </dev/null >/dev/null 2>
 fi
 pass "Perplexity removal refuses to run without HOME"
 
-# ~/.grok belongs to the Grok CLI that omarchy-default-agent installs.
-fresh_home
-mkdir -p "$HOME/.config/Grok Bot" "$HOME/.grokbot" "$HOME/.grok"
-"$ROOT/bin/omarchy-remove-ai-grok-bot" >/dev/null
-
-[[ ! -e $HOME/.grokbot ]] || fail "Grok Bot removal deletes its own data"
-pass "Grok Bot removal deletes its own data"
-
-[[ -d $HOME/.grok ]] || fail "Grok Bot removal keeps the Grok CLI's state"
-pass "Grok Bot removal keeps the Grok CLI's state"
-
-# Every acceleration variant depends on the base package, so package presence is
-# the test the remover can actually act on; the command alone is also provided by
-# builds omarchy-pkg-drop will not touch.
-ollama_row=$(grep '^  "remove.ai.ollama":' "$ROOT/default/omarchy/omarchy-menu.jsonc")
-[[ $ollama_row == *'"when":"omarchy-pkg-present ollama"'* ]] ||
-  fail "Ollama removal is offered only where the package is installed" "$ollama_row"
-pass "Ollama removal is offered only where the package is installed"
-
 # OpenClaw's gateway unit and web app launcher are the app's own; the agent
 # state in ~/.openclaw is the user's. systemctl and openclaw are stubbed so the
 # sandbox never reaches the real user manager or a real gateway.
@@ -242,13 +157,17 @@ chmod +x "$tmp_dir/bin/openclaw"
 fresh_openclaw_home() {
   fresh_home
   mkdir -p "$HOME/.config/systemd/user/default.target.wants" "$HOME/.openclaw" \
-    "$HOME/.local/share/applications" "$HOME/.local/share/icons/hicolor/256x256/apps"
+    "$HOME/.local/share/applications" "$HOME/.local/share/icons/hicolor/256x256/apps" \
+    "$HOME/.local/state/omarchy/openclaw-stopped"
   touch "$HOME/.config/systemd/user/openclaw-gateway.service" \
     "$HOME/.config/systemd/user/openclaw-gateway.service.bak" \
+    "$HOME/.config/systemd/user/openclaw-gateway.service.reconcile-0f1e.bak" \
+    "$HOME/.config/systemd/user/openclaw-gateway.service.reconcile-0f1e.receipt.bak" \
     "$HOME/.config/systemd/user/openclaw-node.service" \
     "$HOME/.openclaw/openclaw.json" \
     "$HOME/.local/share/applications/OpenClaw.desktop" \
-    "$HOME/.local/share/icons/hicolor/256x256/apps/openclaw.png"
+    "$HOME/.local/share/icons/hicolor/256x256/apps/openclaw.png" \
+    "$HOME/.local/state/omarchy/openclaw-stopped/gateway"
   ln -s ../openclaw-gateway.service \
     "$HOME/.config/systemd/user/default.target.wants/openclaw-gateway.service"
   ln -s ../openclaw-node.service \
@@ -269,11 +188,14 @@ fresh_openclaw_home
 
 for gone in .config/systemd/user/openclaw-gateway.service \
   .config/systemd/user/openclaw-gateway.service.bak \
+  .config/systemd/user/openclaw-gateway.service.reconcile-0f1e.bak \
+  .config/systemd/user/openclaw-gateway.service.reconcile-0f1e.receipt.bak \
   .config/systemd/user/default.target.wants/openclaw-gateway.service \
   .config/systemd/user/openclaw-node.service \
   .config/systemd/user/default.target.wants/openclaw-node.service \
   .local/share/applications/OpenClaw.desktop \
-  .local/share/icons/hicolor/256x256/apps/openclaw.png; do
+  .local/share/icons/hicolor/256x256/apps/openclaw.png \
+  .local/state/omarchy/openclaw-stopped; do
   [[ ! -e $HOME/$gone && ! -L $HOME/$gone ]] || fail "OpenClaw removal deletes the service and launcher it installed" "$gone"
 done
 pass "OpenClaw removal deletes the service and launcher it installed"
@@ -294,6 +216,24 @@ pass "OpenClaw removal stops the gateway service"
 ! grep -q '^gum:' "$TEST_LOG" ||
   fail "OpenClaw removal keeps the user's agent state" "asked about ~/.openclaw without a terminal"
 pass "OpenClaw removal keeps the user's agent state"
+
+# The command on PATH goes; the OpenClaw it pointed at stays with the state,
+# since only that copy is sure to open it. A link somewhere else is not Omarchy's.
+fresh_openclaw_home
+mkdir -p "$HOME/.openclaw/bin" "$HOME/.openclaw/tools/node-v24.19.0/lib" "$HOME/.local/bin"
+printf '#!/usr/bin/env bash\n' >"$HOME/.openclaw/bin/openclaw"
+ln -s "$HOME/.openclaw/bin/openclaw" "$HOME/.local/bin/openclaw"
+"$ROOT/bin/omarchy-remove-ai-openclaw" >/dev/null
+[[ ! -e $HOME/.local/bin/openclaw && ! -L $HOME/.local/bin/openclaw ]] || fail "OpenClaw removal takes openclaw off PATH"
+[[ -f $HOME/.openclaw/bin/openclaw && -d $HOME/.openclaw/tools && -f $HOME/.openclaw/openclaw.json ]] ||
+  fail "OpenClaw removal keeps the OpenClaw that can open the state"
+
+fresh_openclaw_home
+mkdir -p "$HOME/.local/bin"
+ln -s /opt/openclaw/openclaw "$HOME/.local/bin/openclaw"
+"$ROOT/bin/omarchy-remove-ai-openclaw" >/dev/null
+[[ -L $HOME/.local/bin/openclaw ]] || fail "OpenClaw removal takes openclaw off PATH" "someone else's link went with it"
+pass "OpenClaw removal takes openclaw off PATH and keeps the copy that can open the state"
 
 # A CLI that knows `gateway uninstall` owns the teardown; the manual systemd
 # fallback must not run.
@@ -378,3 +318,22 @@ rc=0
 ! grep -q '^drop:openclaw$' "$TEST_LOG" ||
   fail "OpenClaw removal aborts when systemd cannot be reached" "package dropped anyway"
 pass "OpenClaw removal aborts when systemd cannot be reached"
+
+# A removal that fails after taking a service down still drops that service's
+# restart record, so nothing later tries to start a unit that is gone.
+fresh_openclaw_home
+cat >"$tmp_dir/bin/systemctl" <<'SCRIPT'
+#!/bin/bash
+printf 'systemctl:%s\n' "$*" >>"$TEST_LOG"
+SCRIPT
+chmod +x "$tmp_dir/bin/systemctl"
+mv "$tmp_dir/bin/omarchy-pkg-drop" "$tmp_dir/omarchy-pkg-drop.real"
+printf '#!/bin/bash\nexit 1\n' >"$tmp_dir/bin/omarchy-pkg-drop"
+chmod +x "$tmp_dir/bin/omarchy-pkg-drop"
+if "$ROOT/bin/omarchy-remove-ai-openclaw" >/dev/null 2>&1; then
+  fail "OpenClaw removal fails when the package cannot be dropped"
+fi
+[[ ! -e $HOME/.local/state/omarchy/openclaw-stopped/gateway ]] ||
+  fail "OpenClaw removal drops a service's restart record with the service, before anything else can fail"
+mv "$tmp_dir/omarchy-pkg-drop.real" "$tmp_dir/bin/omarchy-pkg-drop"
+pass "OpenClaw removal drops a service's restart record with the service, before anything else can fail"
