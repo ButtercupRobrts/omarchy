@@ -278,6 +278,39 @@ set_scale() {
     '[.[] | select(.name != $name) | .scale] + [$new] | max' | awk '{ printf "%d", int($1 + 0.5) }')"
   local monitor_lua="$HOME/.config/hypr/monitors.lua"
 
+  # Anchor the recompute to the monitor's configured rule when a literal one
+  # exists: a boot/hotplug race can leave the live layout on the wildcard
+  # `auto` placement, and maintaining a drifted position faithfully
+  # re-applies the drift. The configured rule is the intent; the live layout
+  # is the accident. Only single-line literal rules count — a variable or
+  # `auto` reference leaves the live values alone.
+  local configured_pos configured_scale
+  read -r configured_pos configured_scale < <(
+    awk -v name="$active_monitor" '
+      match($0, "output = \"" name "\"") {
+        if (match($0, /position = "-?[0-9]+x-?[0-9]+"/))
+          pos = substr($0, RSTART + 12, RLENGTH - 13)
+        if (match($0, /scale = [0-9.]+/))
+          scale = substr($0, RSTART + 8, RLENGTH - 8)
+        print pos, scale
+        exit
+      }
+    ' "$monitor_lua" 2>/dev/null
+  ) || true
+  if [[ ${configured_pos:-} =~ ^-?[0-9]+x-?[0-9]+$ ]]; then
+    x="${configured_pos%x*}"
+    y="${configured_pos#*x}"
+    # Patch the recompute's target row with the configured anchor so the
+    # adjacency math resolves against the intended layout.
+    if [[ ${configured_scale:-} =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+      monitors_json=$(printf '%s\n' "$monitors_json" | jq -c --arg name "$active_monitor" --argjson cx "$x" --argjson cy "$y" --argjson cs "$configured_scale" \
+        'map(if .name == $name then .x = $cx | .y = $cy | .scale = $cs else . end)')
+    else
+      monitors_json=$(printf '%s\n' "$monitors_json" | jq -c --arg name "$active_monitor" --argjson cx "$x" --argjson cy "$y" \
+        'map(if .name == $name then .x = $cx | .y = $cy else . end)')
+    fi
+  fi
+
   # The scale change resizes the monitor's logical box, so the position is
   # recomputed to keep edge-adjacent monitors touching their neighbors (a
   # fixed offset encodes the old logical size -- upstream #10922). On unusable

@@ -962,3 +962,21 @@ grep -F 'transform = 1' "$eval_out" >/dev/null || fail "monitor scaling replays 
 grep -Fx 'hl.monitor({ output = "eDP-1", mode = "1920x1080@120.0", position = "0x0", scale = 2, transform = 1 })' "$monitor_lua" >/dev/null ||
   fail "monitor scaling persists transform on an appended rule"
 pass "monitor scaling replays and persists a nonzero transform"
+
+# A drifted live layout does not win over the configured rule: a boot/hotplug
+# race parked HDMI-A-1 on the wildcard auto placement (1536x0 @ 1.0), while
+# the literal rule says -128x-864 @ 1.25 (above eDP-1, whose y=0 top edge the
+# configured bottom edge touches). The recompute must anchor to the configured
+# rule and keep that adjacency (1080/1.6 = 675 -> -128x-675), not faithfully
+# re-apply the drift beside eDP-1.
+cat >"$monitor_lua" <<'LUA'
+hl.monitor({ output = "eDP-1", mode = "preferred", position = "0x0", scale = 1.25 })
+hl.monitor({ output = "HDMI-A-1", mode = "preferred", position = "-128x-864", scale = 1.25 })
+hl.monitor({ output = "", mode = "preferred", position = "auto", scale = "auto" })
+LUA
+rm -f "$eval_out"
+OMARCHY_TEST_MONITORS_JSON='[{"name":"eDP-1","focused":true,"scale":1.25,"width":1920,"height":1080,"refreshRate":120.0,"x":0,"y":0,"transform":0,"description":"BOE","make":"BOE","model":"X","serial":"0x1"},{"name":"HDMI-A-1","focused":false,"scale":1.0,"width":1920,"height":1080,"refreshRate":144.0,"x":1536,"y":0,"transform":0,"description":"Samsung","make":"Samsung","model":"S22D300","serial":"0x2"}]' \
+  run_scaling 1.6 HDMI-A-1
+grep -F 'position = "-128x-675"' "$eval_out" >/dev/null ||
+  fail "monitor scaling anchors the recompute to the configured position, not the drifted live layout" "eval: $(cat "$eval_out")"
+pass "monitor scaling anchors a drifted live layout to the configured rule"
