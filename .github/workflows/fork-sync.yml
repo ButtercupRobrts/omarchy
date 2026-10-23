@@ -1,0 +1,43 @@
+name: fork-sync
+
+on:
+  push:
+  schedule:
+    - cron: "0 6 * * 1"   # weekly drift canary, Mondays 06:00 UTC
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: CLI tests
+        run: ./test/cli
+      - name: Shell tests
+        run: ./test/shell
+
+  drift-canary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Measure drift vs newest upstream release
+        run: |
+          git remote add upstream https://github.com/omacom/omarchy.git
+          git fetch upstream 'refs/heads/v4-0-*:refs/remotes/upstream/v4-0-*'
+          newest=$(git for-each-ref --sort=-version:refname --format='%(refname:short)' 'refs/remotes/upstream/v4-0-*' | head -1)
+          echo "newest release ref: $newest"
+          if git merge-base --is-ancestor "$newest" HEAD; then
+            echo "HEAD contains $newest — fork is in sync"
+            exit 0
+          fi
+          behind=$(git rev-list --count "HEAD..$newest")
+          echo "::warning::fork is $behind commits behind $newest"
+          if tree=$(git merge-tree --write-tree HEAD "$newest" 2>/dev/null); then
+            echo "a merge with $newest would apply cleanly"
+            exit 0
+          fi
+          echo "::error::merge with $newest has conflicts — sync the fork before the next omarchy update"
+          git merge-tree --write-tree --name-only HEAD "$newest" 2>/dev/null | tail -n +2 || true
+          exit 1
