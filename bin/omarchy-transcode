@@ -356,11 +356,31 @@ prompt_target_size() {
   return 1
 }
 
+# The audio ladder for --target: the probed stream gets aac at the locked
+# 192k while the net budget holds that under ~25% share (net >= 768k), aac
+# 128k down to its own 25% share (net >= 512k), and libopus 56k below --
+# where a fixed 192k would claim most of the budget and leave the video
+# nothing. A source with no audio stream returns none/0 and frees the whole
+# budget for the video. Prints "<codec> <kbps>" for the plan vector; "none"
+# is a codec the encode arm maps to no audio args.
+choose_audio() {
+  local budget="$1" has_audio="${2:-1}"
+  if (( has_audio == 0 )); then
+    printf 'none 0\n'
+  elif (( budget >= 768 )); then
+    printf 'aac 192\n'
+  elif (( budget >= 512 )); then
+    printf 'aac 128\n'
+  else
+    printf 'libopus 56\n'
+  fi
+}
+
 # Plans a --target run: refuses a target at or above the source size (a
 # re-encode can only degrade it -- drop --target and pick a quality for format
 # conversion), probes duration and audio, derives the video bitrate
-# (target*8/duration/1000 with a ~2% container reserve, minus the audio
-# stream), then walks the locked 2000/800/400 kbps floors stepping
+# (target*8/duration/1000 with a ~2% container reserve, minus the chosen
+# audio tier), then walks the locked 2000/800/400 kbps floors stepping
 # 4k -> 1080p -> 720p until the budget fits. Prints the plan vector
 # "<res> <v_kbps> <a_codec> <a_kbps> <v_codec> <preset> <container>" on
 # stdout; every refusal prints to stderr and returns nonzero, and cheap
@@ -371,7 +391,7 @@ prompt_target_size() {
 plan_target() {
   local input="$1" target_bytes="$2" res="$3"
   local src_bytes duration audio_kbps video_kbps floor min_label
-  local a_kbps v_codec preset
+  local net_kbps a_codec a_kbps v_codec preset container
 
   src_bytes=$(stat -c %s "$input" 2>/dev/null || true)
   if [[ $src_bytes =~ ^[0-9]+$ ]] && (( target_bytes >= src_bytes )); then
@@ -388,12 +408,22 @@ plan_target() {
 
   # Duration is gated inside awk because (( )) cannot compare floats ("60.033"
   # is a syntax error there). %d truncates toward zero and may go negative;
-  # the floor loop converts that into the 720p refusal.
-  video_kbps=$(awk -v b="$target_bytes" -v d="$duration" -v a="$audio_kbps" 'BEGIN {
+  # the floor loop converts that into the lowest-rung refusal.
+  net_kbps=$(awk -v b="$target_bytes" -v d="$duration" 'BEGIN {
     if (d <= 0) exit 1
-    printf "%d", b * 8 / d / 1000 * 0.98 - a
+    printf "%d", b * 8 / d / 1000 * 0.98
   }') ||
     { echo "Cannot determine duration for $input; cannot size to a target" >&2; return 1; }
+
+  read -r a_codec a_kbps <<<"$(choose_audio "$net_kbps" "$audio_kbps")"
+  video_kbps=$(( net_kbps - a_kbps ))
+
+  # Opus only ships in mkv -- mp4+opus muxes but enough players choke on the
+  # audio track that it is not worth the toast explaining a silent file.
+  container=mp4
+  if [[ $a_codec == "libopus" ]]; then
+    container=mkv
+  fi
 
   while :; do
     case "$res" in
@@ -408,8 +438,8 @@ plan_target() {
     1080p) res=720p ;;
     *)
       # Below the 720p floor: refuse naming the achievable minimum at that
-      # floor -- (400k + audio) * duration * 125 bytes, in decimal MB.
-      min_label=$(awk -v a="$audio_kbps" -v d="$duration" \
+      # floor -- (floor + chosen audio) * duration * 125 bytes, in decimal MB.
+      min_label=$(awk -v a="$a_kbps" -v d="$duration" \
         'BEGIN { printf "%.0f MB", (400 + a) * d * 125 / 1000000 }')
       echo "Cannot fit under $(numfmt --to=si "$target_bytes") -- smallest achievable is ~$min_label for this duration" >&2
       return 1
@@ -418,10 +448,8 @@ plan_target() {
   done
 
   # The plan vector keeps encode decisions in the planner and ffmpeg argv out
-  # of it. a_kbps is the encode-side audio bitrate: probed audio -> 192k (the
-  # locked rate); no audio stream -> 0, which makes the producing passes skip
-  # audio args instead of pointing aac at nothing. v_codec/preset duplicate
-  # transcode_video's 4k-keyed table per the quality_token convention.
+  # of it. v_codec/preset duplicate transcode_video's 4k-keyed table per the
+  # quality_token convention.
   if [[ $res == "4k" ]]; then
     v_codec=libx265
     preset=slow
@@ -429,9 +457,8 @@ plan_target() {
     v_codec=libx264
     preset=fast
   fi
-  if (( audio_kbps > 0 )); then a_kbps=192; else a_kbps=0; fi
 
-  printf '%s %s %s %s %s %s %s\n' "$res" "$video_kbps" aac "$a_kbps" "$v_codec" "$preset" mp4
+  printf '%s %s %s %s %s %s %s\n' "$res" "$video_kbps" "$a_codec" "$a_kbps" "$v_codec" "$preset" "$container"
 }
 
 # Encodes a --target run from the plan vector: two-pass codecs write pass-1

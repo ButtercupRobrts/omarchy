@@ -878,7 +878,8 @@ grep 'notification:' "$calls" | grep -F 'Transcoded to 1080p mp4' >/dev/null ||
   fail "the done toast names the effective rung too" "$(cat "$calls")"
 pass "a 4k request on a 10M budget steps down to 1080p and says so"
 
-# One rung further: 5M/60s derives 461k -- below 1080p's floor, above 720p's.
+# One rung further: 5M/60s nets 653k -- below 1080p's floor, above 720p's --
+# and lands the aac 128k mid-tier (net < 768k), so the video derives 525k.
 # numfmt --to=si canonicalizes exact-decimal targets at 3 significant figures,
 # so 5M ships as the -5.0M token (the accepted 1.0M-style shape).
 FAKE_DURATION=60 run_transcode "$TMPDIR/in.mov" mp4 4k --target 5M
@@ -886,9 +887,11 @@ grep -Fx "out=$TMPDIR/in-720p-5.0M.mp4" "$calls" >/dev/null ||
   fail "a 5M target at 4k steps down to the -720p-5.0M name" "$(cat "$calls")"
 grep ' -pass 2 ' "$calls" | grep -F 'scale=-2:720' >/dev/null ||
   fail "a 5M target encodes at 720p" "$(cat "$calls")"
-grep ' -pass 2 ' "$calls" | grep -F -- '-b:v 461k' >/dev/null ||
-  fail "a 5M target derives -b:v 461k" "$(cat "$calls")"
-pass "a 4k request on a 5M budget steps down to 720p"
+grep ' -pass 2 ' "$calls" | grep -F -- '-b:v 525k' >/dev/null ||
+  fail "a 5M target derives -b:v 525k" "$(cat "$calls")"
+grep ' -pass 2 ' "$calls" | grep -F -- '-c:a aac -b:a 128k' >/dev/null ||
+  fail "a 5M target steps the audio ladder to aac 128k" "$(cat "$calls")"
+pass "a 4k request on a 5M budget steps down to 720p on the aac 128k tier"
 
 # Boundary: 25M/60s derives 3074k, at or above the 4k floor, so a 4k request
 # stays at 4k on libx265 -preset slow.
@@ -990,18 +993,23 @@ grep ' -pass 2 ' "$calls" | grep -F 'scale=-2:720' >/dev/null ||
   fail "a stepped-down menu pick encodes at 720p" "$(cat "$calls")"
 pass "an unset resolution prompts as the planner ceiling under --target"
 
-# Below every floor: 4M and 2M over 60 s derive 330k and 69k -- under 720p's
-# 400k floor -- so both refuse naming the computed achievable minimum
-# ((400+192)*60*125 = 4,440,000 B, rendered ~4 MB). The probes ran, but no
+# Below every floor: 4M nets 522k -> aac 128k mid-tier -> 394k video; 2M nets
+# 261k -> opus 56k -> 205k video. Both sit under 720p's 400k floor, so each
+# refuses naming its own achievable minimum ((400+128)*60*125 = 3.96M -> ~4 MB
+# for 4M; (400+56)*60*125 = 3.42M -> ~3 MB for 2M). The probes ran, but no
 # notification or encode did.
 for t in 4M 2M; do
+  case "$t" in
+  4M) want='4 MB' ;;
+  2M) want='3 MB' ;;
+  esac
   status=0
   FAKE_DURATION=60 run_transcode "$TMPDIR/in.mov" mp4 4k --target "$t" || status=$?
   [[ $status -eq 1 ]] ||
     fail "--target $t below every floor exits 1" "exit=$status"
   grep -F 'smallest achievable' "$TMPDIR/stderr" >/dev/null &&
-    grep -F '4 MB' "$TMPDIR/stderr" >/dev/null ||
-    fail "--target $t names the achievable minimum" "$(cat "$TMPDIR/stderr")"
+    grep -F "$want" "$TMPDIR/stderr" >/dev/null ||
+    fail "--target $t names the achievable minimum $want" "$(cat "$TMPDIR/stderr")"
   grep -q '^ffprobe:' "$calls" ||
     fail "--target $t refused after probing" "$(cat "$calls")"
   if grep -q 'notification:' "$calls" || grep -q '^ffmpeg ' "$calls"; then
@@ -1010,9 +1018,10 @@ for t in 4M 2M; do
 done
 pass "targets below every floor refuse naming the achievable minimum"
 
-# 1M over 60 s leaves no room even for the 192k audio stream (the derived
-# -61k rides the floor loop to the same refusal) -- and no negative, zero, or
-# -nan -b:v ever reaches ffmpeg argv on any accumulated line.
+# 1M over 60 s nets 130k -- even the opus-tier audio leaves only a 74k
+# video budget, which rides the floor loop to the same refusal -- and no
+# negative, zero, or -nan -b:v ever reaches ffmpeg argv on any accumulated
+# line.
 status=0
 FAKE_DURATION=60 run_transcode "$TMPDIR/in.mov" mp4 720p --target 1M || status=$?
 [[ $status -eq 1 ]] ||
@@ -1079,13 +1088,37 @@ fi
 pass "failed, N/A, and zero durations all refuse before any notification"
 
 # The probed audio term actually moves the math: a proven-audio-less source
-# drops the 192k term, so 5M/60s at a 4k request derives 653k (not 461k).
+# returns none/0 from the ladder, so 5M/60s at a 4k request derives the full
+# 653k -- and the producing pass carries no audio args at all.
 FAKE_AUDIO=no FAKE_DURATION=60 run_transcode "$TMPDIR/in.mov" mp4 4k --target 5M
 grep ' -pass 2 ' "$calls" | grep -F 'scale=-2:720' >/dev/null ||
   fail "a no-audio 5M target still steps to 720p" "$(cat "$calls")"
 grep ' -pass 2 ' "$calls" | grep -F -- '-b:v 653k' >/dev/null ||
   fail "a no-audio 5M target derives -b:v 653k" "$(cat "$calls")"
-pass "a proven-audio-less source drops the 192k term from the math"
+if grep ' -pass 2 ' "$calls" | grep -F -- '-c:a' >/dev/null; then
+  fail "a no-audio target emits no audio encode args" "$(cat "$calls")"
+fi
+pass "a proven-audio-less source frees the whole budget and skips audio args"
+
+# Below the aac ladder floor: 3.9M/60s nets 509k (<512k) -> opus 56k -> 453k
+# video at 720p, and opus forces the mkv container -- the output name, the
+# start toast, and the done toast all switch from mp4, and faststart (an
+# mp4-only flag) leaves argv entirely.
+FAKE_DURATION=60 run_transcode "$TMPDIR/in.mov" mp4 4k --target 3.9M
+grep -Fx "out=$TMPDIR/in-720p-3.9M.mkv" "$calls" >/dev/null ||
+  fail "an opus-tier target writes the -3.9M.mkv name" "$(cat "$calls")"
+grep ' -pass 2 ' "$calls" | grep -F -- '-b:v 453k' >/dev/null ||
+  fail "an opus-tier target derives -b:v 453k" "$(cat "$calls")"
+grep ' -pass 2 ' "$calls" | grep -F -- '-c:a libopus -b:a 56k' >/dev/null ||
+  fail "an opus-tier target encodes audio as libopus 56k" "$(cat "$calls")"
+if grep ' -pass 2 ' "$calls" | grep -F -- '-movflags' >/dev/null; then
+  fail "an mkv output never carries -movflags" "$(cat "$calls")"
+fi
+grep 'notification:' "$calls" | grep -F 'to mkv' >/dev/null ||
+  fail "the start toast names the mkv container" "$(cat "$calls")"
+grep 'notification:' "$calls" | grep -F 'Transcoded to 720p mkv' >/dev/null ||
+  fail "the done toast names the mkv container" "$(cat "$calls")"
+pass "a sub-512k budget drops to opus 56k and ships mkv"
 
 # The never-probes pin holds: a four-positional tier run never calls
 # plan_target, so no ffprobe or menu lines appear.
