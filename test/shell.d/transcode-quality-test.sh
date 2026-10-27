@@ -168,8 +168,11 @@ SH
 # " $* " selects that arm -- a bare ` codec_type ` glob never matches the real
 # argv. That arm exits 0 with empty output on a successful no-stream probe,
 # which must stay distinguishable from probe failure or the conservative-192
-# rule cannot be exercised. Any other call is the duration probe: FAKE_DURATION
-# unset fails hard with no output; FAKE_PROBE_RC overrides the exit status.
+# rule cannot be exercised. The height probe (`stream=height`) answers
+# FAKE_HEIGHT, or exits 1 unset -- a failed height probe must skip the clamp,
+# which is what keeps every row that never set it on the legacy resolution
+# path. Any other call is the duration probe: FAKE_DURATION unset fails hard
+# with no output; FAKE_PROBE_RC overrides the exit status.
 cat >"$STUB_DIR/ffprobe" <<'SH'
 #!/bin/bash
 printf 'ffprobe: %s\n' "$*" >>"$CALLS"
@@ -179,6 +182,13 @@ case " $* " in
     echo audio
   fi
   exit 0
+  ;;
+*" stream=height "*)
+  if [[ -n ${FAKE_HEIGHT+x} ]]; then
+    printf '%s\n' "$FAKE_HEIGHT"
+    exit 0
+  fi
+  exit 1
   ;;
 *)
   if [[ -n ${FAKE_DURATION+x} ]]; then
@@ -811,11 +821,12 @@ ffmpeg_line=$(grep -n '^ffmpeg ' "$calls" | head -n1 | cut -d: -f1 || true)
   fail "the --target start toast precedes the encode" "$(cat "$calls")"
 pass "a --target run scopes its toast per pass on one notification id"
 
-# --target probes exactly twice (duration + audio presence) -- the positive
-# twin of the tier run's never-probes pin.
-[[ $(grep -c '^ffprobe:' "$calls") -eq 2 ]] ||
-  fail "a --target run probes exactly twice" "$(cat "$calls")"
-pass "a --target run probes exactly twice"
+# --target probes exactly three times (duration + audio presence + source
+# height for the clamp) -- the positive twin of the tier run's never-probes
+# pin.
+[[ $(grep -c '^ffprobe:' "$calls") -eq 3 ]] ||
+  fail "a --target run probes exactly three times" "$(cat "$calls")"
+pass "a --target run probes exactly three times"
 
 # All four slots supplied plus --target: zero menus, and the quality menu in
 # particular is skipped entirely.
@@ -993,16 +1004,13 @@ grep ' -pass 2 ' "$calls" | grep -F 'scale=-2:720' >/dev/null ||
   fail "a stepped-down menu pick encodes at 720p" "$(cat "$calls")"
 pass "an unset resolution prompts as the planner ceiling under --target"
 
-# Below every floor: 4M nets 522k -> aac 128k mid-tier -> 394k video; 2M nets
-# 261k -> opus 56k -> 205k video. Both sit under 720p's 400k floor, so each
-# refuses naming its own achievable minimum ((400+128)*60*125 = 3.96M -> ~4 MB
-# for 4M; (400+56)*60*125 = 3.42M -> ~3 MB for 2M). The probes ran, but no
-# notification or encode did.
-for t in 4M 2M; do
-  case "$t" in
-  4M) want='4 MB' ;;
-  2M) want='3 MB' ;;
-  esac
+# Below every floor: the extended ladder reaches 480p/180k, so the refuse
+# line moved to (180+56)*60*125 = 1.77M -> ~2 MB. 1.5M nets 196k -> opus 56k
+# -> 140k video; 1M nets 130k -> 74k video -- both under the last floor, so
+# both refuse naming the same ~2 MB achievable minimum. The probes ran, but
+# no notification or encode did.
+for t in 1.5M 1M; do
+  want='2 MB'
   status=0
   FAKE_DURATION=60 run_transcode "$TMPDIR/in.mov" mp4 4k --target "$t" || status=$?
   [[ $status -eq 1 ]] ||
@@ -1119,6 +1127,55 @@ grep 'notification:' "$calls" | grep -F 'to mkv' >/dev/null ||
 grep 'notification:' "$calls" | grep -F 'Transcoded to 720p mkv' >/dev/null ||
   fail "the done toast names the mkv container" "$(cat "$calls")"
 pass "a sub-512k budget drops to opus 56k and ships mkv"
+
+# The extended ladder reaches the new rungs: 4M/60s nets 522k -> aac 128k ->
+# 394k video -- under 720p's 400k floor, at 540p's 250k floor -- so the run
+# steps past 720p to 540p and keeps the mp4/aac pair.
+FAKE_DURATION=60 run_transcode "$TMPDIR/in.mov" mp4 4k --target 4M
+grep -Fx "out=$TMPDIR/in-540p-4.0M.mp4" "$calls" >/dev/null ||
+  fail "a 4M target steps down to the -540p-4.0M name" "$(cat "$calls")"
+grep ' -pass 2 ' "$calls" | grep -F 'scale=-2:540' >/dev/null ||
+  fail "a 4M target encodes at 540p" "$(cat "$calls")"
+grep ' -pass 2 ' "$calls" | grep -F -- '-b:v 394k' >/dev/null ||
+  fail "a 4M target derives -b:v 394k" "$(cat "$calls")"
+grep 'notification:' "$calls" | grep -F '540p' |
+  grep -F 'stepped down from 4k' >/dev/null ||
+  fail "the toast discloses the 4k->540p step-down" "$(cat "$calls")"
+rm -f "$TMPDIR/in-540p-4.0M.mp4"
+pass "a sub-720p-floor budget steps through 720p to 540p"
+
+# One rung lower still: 2.2M/60s nets 287k -> opus 56k -> 231k video -- under
+# 540p's 250k floor, at 480p's 180k -- so it lands on 480p in mkv.
+FAKE_DURATION=60 run_transcode "$TMPDIR/in.mov" mp4 4k --target 2.2M
+grep -Fx "out=$TMPDIR/in-480p-2.2M.mkv" "$calls" >/dev/null ||
+  fail "a 2.2M target steps down to the -480p-2.2M.mkv name" "$(cat "$calls")"
+grep ' -pass 2 ' "$calls" | grep -F 'scale=-2:480' >/dev/null ||
+  fail "a 2.2M target encodes at 480p" "$(cat "$calls")"
+grep ' -pass 2 ' "$calls" | grep -F -- '-b:v 231k' >/dev/null ||
+  fail "a 2.2M target derives -b:v 231k" "$(cat "$calls")"
+rm -f "$TMPDIR/in-480p-2.2M.mkv"
+pass "a sub-540p-floor budget lands on 480p"
+
+# The no-upscale clamp: a 600px-tall source on a generous budget still never
+# encodes above its own height -- the clamp steps 720p -> 540p before the
+# floors run, and the toast discloses the step from the requested rung.
+FAKE_HEIGHT=600 FAKE_DURATION=60 run_transcode "$TMPDIR/in.mov" mp4 720p --target 25M
+grep -Fx "out=$TMPDIR/in-540p-25M.mp4" "$calls" >/dev/null ||
+  fail "a 600px source clamps a 720p request to -540p-25M" "$(cat "$calls")"
+grep ' -pass 2 ' "$calls" | grep -F 'scale=-2:540' >/dev/null ||
+  fail "a 600px source encodes at 540p" "$(cat "$calls")"
+grep 'notification:' "$calls" | grep -F 'stepped down from 720p' >/dev/null ||
+  fail "the toast discloses the clamped step-down" "$(cat "$calls")"
+rm -f "$TMPDIR/in-540p-25M.mp4"
+pass "a --target run never encodes above the source height"
+
+# Clamp negative: a source exactly at the requested rung stays put -- the
+# boundary is <=, not <.
+FAKE_HEIGHT=720 FAKE_DURATION=60 run_transcode "$TMPDIR/in.mov" mp4 720p --target 25M
+grep ' -pass 2 ' "$calls" | grep -F 'scale=-2:720' >/dev/null ||
+  fail "a 720px source keeps a 720p request" "$(cat "$calls")"
+rm -f "$TMPDIR/in-720p-25M.mp4"
+pass "a source at the requested height is not clamped"
 
 # The never-probes pin holds: a four-positional tier run never calls
 # plan_target, so no ffprobe or menu lines appear.
@@ -1299,18 +1356,18 @@ grep '^menu-select: ' "$TMPDIR/calls-custom" |
     "$(cat "$TMPDIR/calls-custom")"
 pass "the mp4 menu offers Custom size… last with a subtext and medium pre-highlighted"
 
-# The CLI twin of the parity pin: --target 25M never prompts and pays only the
-# planner's two probes.
+# The CLI twin of the parity pin: --target 25M never prompts and pays only
+# the planner's three probes.
 rm -f "$TMPDIR/in-1080p-25M.mp4"
 FAKE_DURATION=60 run_transcode "$TMPDIR/in.mov" mp4 1080p --target 25M
 grep -E '^(ffmpeg |notification:)' "$calls" |
   sed 's|transcode-2pass\.[^/ ]*|transcode-2pass.X|' >"$TMPDIR/parity-cli"
-[[ $(grep -c '^ffprobe:' "$calls") -eq 2 ]] ||
-  fail "the --target baseline probes exactly twice" "$(cat "$calls")"
+[[ $(grep -c '^ffprobe:' "$calls") -eq 3 ]] ||
+  fail "the --target baseline probes exactly three times" "$(cat "$calls")"
 if grep -q '^menu-select:' "$calls" || grep -q '^menu-input:' "$calls"; then
   fail "the --target baseline never prompts" "$(cat "$calls")"
 fi
-pass "a --target 25M run never prompts and probes exactly twice"
+pass "a --target 25M run never prompts and probes exactly three times"
 
 # The Custom run's encode is byte-identical to the CLI run's -- same two-pass
 # argv, same toast text; only the menu plumbing and the two menu-estimate
@@ -1327,8 +1384,8 @@ grep -Fx "out=$TMPDIR/in-1080p-25M.mp4" "$TMPDIR/calls-custom" >/dev/null ||
   fail "a Custom pick fires the input prompt exactly once" "$(cat "$TMPDIR/calls-custom")"
 grep -Fx 'menu-input: Target size (e.g. 25M)' "$TMPDIR/calls-custom" >/dev/null ||
   fail "the input prompt carries its locked text" "$(cat "$TMPDIR/calls-custom")"
-[[ $(grep -c '^ffprobe:' "$TMPDIR/calls-custom") -eq 4 ]] ||
-  fail "a Custom run probes 4 times (2 menu estimates + 2 planner)" \
+[[ $(grep -c '^ffprobe:' "$TMPDIR/calls-custom") -eq 5 ]] ||
+  fail "a Custom run probes 5 times (2 menu estimates + 3 planner)" \
     "$(cat "$TMPDIR/calls-custom")"
 pass "a Custom size pick encodes byte-identically to --target 25M"
 
@@ -1432,30 +1489,31 @@ fi
 pass "Esc at the first input prompt cancels before the notification"
 
 # D-01: a parseable-below-floor answer refuses byte-identically to the CLI --
-# the re-prompt budget wraps the parser only, never plan_target.
+# the re-prompt budget wraps the parser only, never plan_target. 1.5M sits
+# under the extended ladder's 480p+opus floor (~2 MB minimum at 60 s).
 status=0
-FAKE_DURATION=60 run_transcode "$TMPDIR/in.mov" mp4 4k --target 4M || status=$?
+FAKE_DURATION=60 run_transcode "$TMPDIR/in.mov" mp4 4k --target 1.5M || status=$?
 [[ $status -ne 0 ]] ||
-  fail "the --target 4M baseline refuses" "exit=$status"
-cp "$TMPDIR/stderr" "$TMPDIR/stderr-cli-4M"
+  fail "the --target 1.5M baseline refuses" "exit=$status"
+cp "$TMPDIR/stderr" "$TMPDIR/stderr-cli-1.5M"
 status=0
-FAKE_INPUT=4M FAKE_DURATION=60 FAKE_PICK=$'Custom size…\tEnter a size like 25M' \
+FAKE_INPUT=1.5M FAKE_DURATION=60 FAKE_PICK=$'Custom size…\tEnter a size like 25M' \
   run_transcode "$TMPDIR/in.mov" mp4 4k || status=$?
 [[ $status -ne 0 ]] ||
   fail "a below-floor Custom answer refuses" "exit=$status"
 grep -F 'smallest achievable' "$TMPDIR/stderr" >/dev/null &&
-  grep -F '4 MB' "$TMPDIR/stderr" >/dev/null ||
+  grep -F '2 MB' "$TMPDIR/stderr" >/dev/null ||
   fail "a below-floor Custom answer names the achievable minimum" "$(cat "$TMPDIR/stderr")"
-if ! cmp -s "$TMPDIR/stderr-cli-4M" "$TMPDIR/stderr"; then
-  fail "the Custom refusal is byte-identical to --target 4M" \
-    "$(diff -u "$TMPDIR/stderr-cli-4M" "$TMPDIR/stderr")"
+if ! cmp -s "$TMPDIR/stderr-cli-1.5M" "$TMPDIR/stderr"; then
+  fail "the Custom refusal is byte-identical to --target 1.5M" \
+    "$(diff -u "$TMPDIR/stderr-cli-1.5M" "$TMPDIR/stderr")"
 fi
 [[ $(grep -c '^menu-input:' "$calls") -eq 1 ]] ||
   fail "a planner refusal never spends a re-prompt" "$(cat "$calls")"
 if grep -q 'notification:' "$calls" || grep -q '^ffmpeg ' "$calls"; then
   fail "a below-floor Custom answer refuses before the notification" "$(cat "$calls")"
 fi
-pass "a below-floor Custom answer refuses byte-identically to --target 4M"
+pass "a below-floor Custom answer refuses byte-identically to --target 1.5M"
 
 # The accumulated ffmpeg argv across every run carries no overwrite flag --
 # dedupe and the passdir-sibling retry make -y and -n unnecessary.
