@@ -361,7 +361,8 @@ prompt_target_size() {
 # conversion), probes duration and audio, derives the video bitrate
 # (target*8/duration/1000 with a ~2% container reserve, minus the audio
 # stream), then walks the locked 2000/800/400 kbps floors stepping
-# 4k -> 1080p -> 720p until the budget fits. Prints "<res> <video_kbps>" on
+# 4k -> 1080p -> 720p until the budget fits. Prints the plan vector
+# "<res> <v_kbps> <a_codec> <a_kbps> <v_codec> <preset> <container>" on
 # stdout; every refusal prints to stderr and returns nonzero, and cheap
 # refusals precede the probes. A negative or zero derived bitrate is not
 # special-cased -- it rides the floor loop to the 720p refusal, which IS the
@@ -370,6 +371,7 @@ prompt_target_size() {
 plan_target() {
   local input="$1" target_bytes="$2" res="$3"
   local src_bytes duration audio_kbps video_kbps floor min_label
+  local a_kbps v_codec preset
 
   src_bytes=$(stat -c %s "$input" 2>/dev/null || true)
   if [[ $src_bytes =~ ^[0-9]+$ ]] && (( target_bytes >= src_bytes )); then
@@ -415,24 +417,41 @@ plan_target() {
     esac
   done
 
-  printf '%s %s\n' "$res" "$video_kbps"
+  # The plan vector keeps encode decisions in the planner and ffmpeg argv out
+  # of it. a_kbps is the encode-side audio bitrate: probed audio -> 192k (the
+  # locked rate); no audio stream -> 0, which makes the producing passes skip
+  # audio args instead of pointing aac at nothing. v_codec/preset duplicate
+  # transcode_video's 4k-keyed table per the quality_token convention.
+  if [[ $res == "4k" ]]; then
+    v_codec=libx265
+    preset=slow
+  else
+    v_codec=libx264
+    preset=fast
+  fi
+  if (( audio_kbps > 0 )); then a_kbps=192; else a_kbps=0; fi
+
+  printf '%s %s %s %s %s %s %s\n' "$res" "$video_kbps" aac "$a_kbps" "$v_codec" "$preset" mp4
 }
 
-# Two-pass encode to a size budget: pass 1 writes stats into a per-run mktemp
-# passdir under TMPDIR (never the output dir -- a stale passlog would silently
-# corrupt the next run) and pass 2 encodes at the derived -b:v. The passdir is
-# removed whole by an EXIT trap plus an explicit rm at the end -- EXIT, not
-# RETURN, because a failed pass aborts under set -e without firing
-# function-return traps, and the -d guard keeps the persisted trap inert after
-# return (this script has no other EXIT trap). -vf/-c:v/-preset/-b:v are
-# identical across passes; -an only on pass 1, -movflags only on pass 2, and
-# no -crf anywhere (the tier arms own that flag). The scale and codec tables
-# deliberately duplicate transcode_video's per the quality_token convention --
-# a shared table would refactor that code inside the PR conflict window.
+# Encodes a --target run from the plan vector: two-pass codecs write pass-1
+# stats into a per-run mktemp passdir under TMPDIR (never the output dir -- a
+# stale passlog would silently corrupt the next run) and pass 2 encodes at
+# the derived -b:v. The passdir is removed whole by an EXIT trap plus an
+# explicit rm at the end -- EXIT, not RETURN, because a failed pass aborts
+# under set -e without firing function-return traps, and the -d guard keeps
+# the persisted trap inert after return (this script has no other EXIT trap).
+# -vf/-c:v/-preset/-b:v are identical across passes; -an only on pass 1,
+# audio/muxer args only on the producing passes, and no -crf anywhere (the
+# tier arms own that flag). The scale table deliberately duplicates
+# transcode_video's per the quality_token convention -- a shared table would
+# refactor that code inside the PR conflict window.
 transcode_video_target() {
-  local input="$1" resolution="$2" output="$3" video_kbps="$4" target_bytes="$5"
-  local notify_id="${6:-}" desc="${7:-}"
-  local scale codec preset passdir actual retry_kbps
+  local input="$1" resolution="$2" output="$3" video_kbps="$4"
+  local a_codec="$5" a_kbps="$6" v_codec="$7" preset="$8" container="$9"
+  local target_bytes="${10}" notify_id="${11:-}" desc="${12:-}"
+  local scale passdir actual retry_kbps
+  local vargs margs rargs
 
   case "$resolution" in
   4k) scale='scale=-2:2160' ;;
@@ -444,12 +463,13 @@ transcode_video_target() {
     ;;
   esac
 
-  if [[ $resolution == "4k" ]]; then
-    codec=libx265
-    preset=slow
-  else
-    codec=libx264
-    preset=fast
+  vargs=(-vf "$scale" -c:v "$v_codec" -preset "$preset" -b:v "${video_kbps}k")
+  margs=()
+  if (( a_kbps > 0 )); then
+    margs+=(-c:a "$a_codec" -b:a "${a_kbps}k")
+  fi
+  if [[ $container == "mp4" ]]; then
+    margs+=(-movflags +faststart)
   fi
 
   # The trap bakes the resolved path in -- locals die with the function under
@@ -457,8 +477,7 @@ transcode_video_target() {
   passdir=$(mktemp -d "${TMPDIR:-/tmp}/transcode-2pass.XXXXXX")
   trap "rm -rf -- $(printf '%q' "$passdir")" EXIT
 
-  ffmpeg -i "$input" -vf "$scale" -c:v "$codec" -preset "$preset" \
-    -b:v "${video_kbps}k" -pass 1 -passlogfile "$passdir/2pass" \
+  ffmpeg -i "$input" "${vargs[@]}" -pass 1 -passlogfile "$passdir/2pass" \
     -an -f null /dev/null
 
   # One toast, replaced in place: pass 1/2 -> pass 2/2. A real if keeps the
@@ -466,16 +485,15 @@ transcode_video_target() {
   # inert too, but if names the intent.
   if [[ $notify_id =~ ^[0-9]+$ ]]; then
     omarchy-notification-send -r "$notify_id" -g  "Transcoding video…" \
-      "${desc:-$(basename -- "$input") to mp4 ($resolution}, pass 2/2)" || true
+      "${desc:-$(basename -- "$input") to $container ($resolution}, pass 2/2)" || true
   fi
 
-  ffmpeg -i "$input" -vf "$scale" -c:v "$codec" -preset "$preset" \
-    -b:v "${video_kbps}k" -pass 2 -passlogfile "$passdir/2pass" \
-    -c:a aac -b:a 192k -movflags +faststart "$output"
+  ffmpeg -i "$input" "${vargs[@]}" -pass 2 -passlogfile "$passdir/2pass" \
+    "${margs[@]}" "$output"
 
   # Any byte-over target triggers exactly one pass-2-only retry at a
   # tightened bitrate -- video_kbps scaled by target/actual, resolution and
-  # the 192k audio fixed (re-planning could silently move resolution after
+  # audio fixed (re-planning could silently move resolution after
   # the filename and toasts committed to it). The retry encodes to a passdir
   # sibling -- unique, so no -y is ever needed -- and mv's onto $output only
   # on success, so a failed retry preserves the overshot-but-playable first
@@ -486,10 +504,10 @@ transcode_video_target() {
     retry_kbps=$(awk -v k="$video_kbps" -v t="$target_bytes" -v a="$actual" \
       'BEGIN { printf "%d", k * t / a }')
     if [[ $retry_kbps =~ ^[0-9]+$ ]] && (( retry_kbps > 0 )); then
-      if ffmpeg -i "$input" -vf "$scale" -c:v "$codec" -preset "$preset" \
-           -b:v "${retry_kbps}k" -pass 2 -passlogfile "$passdir/2pass" \
-           -c:a aac -b:a 192k -movflags +faststart "$passdir/retry.mp4"; then
-        mv -f -- "$passdir/retry.mp4" "$output"
+      rargs=(-vf "$scale" -c:v "$v_codec" -preset "$preset" -b:v "${retry_kbps}k")
+      if ffmpeg -i "$input" "${rargs[@]}" -pass 2 -passlogfile "$passdir/2pass" \
+           "${margs[@]}" "$passdir/retry.$container"; then
+        mv -f -- "$passdir/retry.$container" "$output"
       fi
     fi
   fi
@@ -504,6 +522,7 @@ main() {
   local type output quality size positional=()
   local target_bytes="" target_token="" video_kbps="" requested_resolution=""
   local notify_id="" plan="" target_desc=""
+  local a_codec="" a_kbps="" v_codec="" preset="" container=""
 
   while (( $# > 0 )); do
     case "$1" in
@@ -654,7 +673,10 @@ main() {
   if [[ -n $target_bytes ]]; then
     requested_resolution="$resolution"
     plan=$(plan_target "$input" "$target_bytes" "$requested_resolution")
-    read -r resolution video_kbps <<<"$plan"
+    read -r resolution video_kbps a_codec a_kbps v_codec preset container <<<"$plan"
+    # The container becomes the effective format: extension, toasts, and the
+    # done label all name it for free.
+    format="$container"
   fi
 
   output=$(output_path "$input" "$format" "$resolution" "${target_token:-$quality}")
@@ -670,7 +692,9 @@ main() {
       fi
       target_desc+=", target ≤$target_token"
       notify_id=$(omarchy-notification-send -p -g  "Transcoding video…" "$target_desc, pass 1/2)")
-      transcode_video_target "$input" "$resolution" "$output" "$video_kbps" "$target_bytes" "$notify_id" "$target_desc"
+      transcode_video_target "$input" "$resolution" "$output" "$video_kbps" \
+        "$a_codec" "$a_kbps" "$v_codec" "$preset" "$container" \
+        "$target_bytes" "$notify_id" "$target_desc"
     else
       omarchy-notification-send -g  "Transcoding video…" "$(basename -- "$input") to $format ($resolution)"
       transcode_video "$input" "$format" "$resolution" "$output" "$quality"
