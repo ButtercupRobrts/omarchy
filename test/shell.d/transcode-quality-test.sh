@@ -1257,6 +1257,73 @@ grep '^ffmpeg ' "$calls" | grep -F -- '-c:v libx264 -preset fast' >/dev/null ||
 rm -f "$TMPDIR/in-1080p-10M.mp4"
 pass "the frame rate probe moves the codec decision at the margin"
 
+# --- --codec override ------------------------------------------------------
+# --codec seeds the plan vector's codec and skips the heuristic entirely:
+# av1 forces single-pass even where bpp would keep x264 (25M/60s at 1080p is
+# 0.059 bpp), and the frame-rate probe is never spent -- three probes, not
+# four.
+FAKE_DURATION=60 run_transcode "$TMPDIR/in.mov" mp4 1080p --target 25M --codec av1
+[[ $(grep -c '^ffmpeg ' "$calls") -eq 1 ]] ||
+  fail "a --codec av1 run encodes single-pass" "$(cat "$calls")"
+grep '^ffmpeg ' "$calls" | grep -F -- '-c:v libsvtav1 -preset 6' >/dev/null ||
+  fail "--codec av1 encodes with libsvtav1 preset 6" "$(cat "$calls")"
+[[ $(grep -c '^ffprobe:' "$calls") -eq 3 ]] ||
+  fail "a --codec run skips the frame-rate probe" "$(cat "$calls")"
+rm -f "$TMPDIR/in-1080p-25M.mp4"
+pass "--codec av1 pins the codec and skips the heuristic's probe"
+
+# The other direction: h264 forces the two-pass x264 arm even at starvation
+# bpp (5M/60s at 720p is 0.023 bpp, auto-AV1 territory).
+FAKE_DURATION=60 run_transcode "$TMPDIR/in.mov" mp4 4k --target 5M --codec h264
+[[ $(grep -c ' -pass 1 ' "$calls") -eq 1 && $(grep -c ' -pass 2 ' "$calls") -eq 1 ]] ||
+  fail "a --codec h264 run two-passes" "$(cat "$calls")"
+grep ' -pass 2 ' "$calls" | grep -F -- '-c:v libx264 -preset fast' >/dev/null ||
+  fail "--codec h264 encodes with libx264 preset fast" "$(cat "$calls")"
+grep 'notification:' "$calls" | grep -F 'pass 1/2' >/dev/null ||
+  fail "a two-pass run keeps its pass counter" "$(cat "$calls")"
+rm -f "$TMPDIR/in-720p-5.0M.mp4"
+pass "--codec h264 forces the two-pass x264 arm"
+
+# hevc picks the x265/slow pair -- the same codec the 4k auto-table uses.
+FAKE_DURATION=60 run_transcode "$TMPDIR/in.mov" mp4 720p --target 25M --codec hevc
+grep ' -pass 2 ' "$calls" | grep -F -- '-c:v libx265 -preset slow' >/dev/null ||
+  fail "--codec hevc encodes with libx265 preset slow" "$(cat "$calls")"
+rm -f "$TMPDIR/in-720p-25M.mp4"
+pass "--codec hevc encodes with the x265/slow pair"
+
+# --codec without --target refuses: the flag belongs to the budget path.
+status=0
+run_transcode "$TMPDIR/in.mov" mp4 1080p --codec av1 || status=$?
+[[ $status -eq 1 ]] ||
+  fail "--codec without --target exits 1" "exit=$status"
+grep -F -- '--codec requires --target' "$TMPDIR/stderr" >/dev/null ||
+  fail "--codec without --target names the requirement" "$(cat "$TMPDIR/stderr")"
+if grep -q '^ffmpeg ' "$calls" || grep -q 'notification:' "$calls"; then
+  fail "--codec without --target refuses before the encode" "$(cat "$calls")"
+fi
+pass "--codec without --target refuses"
+
+# An unknown codec value exits 2 in the arg loop, before any side effect.
+status=0
+run_transcode "$TMPDIR/in.mov" mp4 1080p --target 25M --codec vp9 || status=$?
+[[ $status -eq 2 ]] ||
+  fail "an unknown --codec value exits 2" "exit=$status"
+grep -F 'Invalid --codec: vp9' "$TMPDIR/stderr" >/dev/null ||
+  fail "an unknown --codec names the accepted values" "$(cat "$TMPDIR/stderr")"
+if [[ -s $calls ]]; then
+  fail "an unknown --codec precedes every side effect" "$(cat "$calls")"
+fi
+pass "an unknown --codec value exits 2 with an empty call log"
+
+# A missing --codec value exits 2 the same way.
+status=0
+run_transcode "$TMPDIR/in.mov" mp4 1080p --target 25M --codec || status=$?
+[[ $status -eq 2 ]] ||
+  fail "a missing --codec value exits 2" "exit=$status"
+grep -F 'Missing value for --codec' "$TMPDIR/stderr" >/dev/null ||
+  fail "a missing --codec value reports on stderr" "$(cat "$TMPDIR/stderr")"
+pass "a missing --codec value exits 2"
+
 # The never-probes pin holds: a four-positional tier run never calls
 # plan_target, so no ffprobe or menu lines appear.
 run_transcode "$TMPDIR/in.mov" mp4 1080p medium
