@@ -3,8 +3,8 @@
 # omarchy:group=transcode
 # omarchy:name=
 # omarchy:summary=Transcode pictures and videos for sharing
-# omarchy:args=[--path path] [--target size] [input] [format] [resolution] [quality]
-# omarchy:examples=omarchy transcode|omarchy transcode --path ~/Downloads|omarchy transcode ~/Videos/demo.mov mp4 1080p|omarchy transcode ~/Pictures/background.heic jpg medium|omarchy transcode ~/Videos/demo.mov mp4 1080p low|omarchy transcode ~/Videos/demo.mov mp4 1080p --target 25M
+# omarchy:args=[--path path] [--target size] [--codec codec] [input] [format] [resolution] [quality]
+# omarchy:examples=omarchy transcode|omarchy transcode --path ~/Downloads|omarchy transcode ~/Videos/demo.mov mp4 1080p|omarchy transcode ~/Pictures/background.heic jpg medium|omarchy transcode ~/Videos/demo.mov mp4 1080p low|omarchy transcode ~/Videos/demo.mov mp4 1080p --target 25M|omarchy transcode ~/Videos/demo.mov mp4 1080p --target 10M --codec av1
 
 set -euo pipefail
 
@@ -19,6 +19,7 @@ or only from --path when provided. Then pick the output format, resolution, and 
 Options:
   --path path    Limit interactive fuzzy file selection to this path
   --target size  Target output size (e.g. 25M, 1.5G); bare number means MB
+  --codec codec  Video codec for --target: h264, hevc, or av1 (default: auto)
 
 Formats:
   Pictures: jpg, png
@@ -416,7 +417,8 @@ choose_audio() {
 # audio tier), clamps the requested rung to at most the source height (a
 # --target run never upscales), then walks the locked 2000/800/400/250/180
 # kbps floors stepping 4k -> 1080p -> 720p -> 540p -> 480p until the budget
-# fits. Prints the plan vector
+# fits. An optional 4th argument pins the codec (h264|hevc|av1) and skips
+# both the bpp heuristic and its frame-rate probe. Prints the plan vector
 # "<res> <v_kbps> <a_codec> <a_kbps> <v_codec> <preset> <container>" on
 # stdout; every refusal prints to stderr and returns nonzero, and cheap
 # refusals precede the probes. A negative or zero derived bitrate is not
@@ -424,7 +426,7 @@ choose_audio() {
 # audio-alone-exceeds-budget refusal, so no negative, zero, or -nan -b:v ever
 # reaches ffmpeg argv.
 plan_target() {
-  local input="$1" target_bytes="$2" res="$3"
+  local input="$1" target_bytes="$2" res="$3" codec_arg="${4:-}"
   local src_bytes duration audio_kbps video_kbps floor min_label
   local net_kbps a_codec a_kbps v_codec preset container
   local src_height rung rw rh fps
@@ -513,32 +515,40 @@ plan_target() {
     esac
   done
 
-  # Codec decision: bits-per-pixel at the rung's nominal 16:9 geometry and
-  # the probed frame rate. Under ~0.035 bpp the bitrate is starvation
-  # territory where AV1's efficiency beats h264 compatibility; above it the
-  # locked x264/x265 4k-split stands. Widths are nominal (scale=-2:H keeps
-  # source aspect), so wide sources read slightly low -- the conservative
-  # direction.
-  case "$res" in
-  4k) rw=3840; rh=2160 ;;
-  1080p) rw=1920; rh=1080 ;;
-  720p) rw=1280; rh=720 ;;
-  540p) rw=960; rh=540 ;;
-  480p) rw=854; rh=480 ;;
-  esac
-  fps=$(video_fps "$input" || true)
-  [[ $fps =~ ^[0-9]+$ ]] || fps=25
-
-  if awk -v k="$video_kbps" -v w="$rw" -v h="$rh" -v f="$fps" \
-       'BEGIN { exit !(k * 1000 / (w * h * f) < 0.035) }'; then
-    v_codec=libsvtav1
-    preset=6
-  elif [[ $res == "4k" ]]; then
-    v_codec=libx265
-    preset=slow
+  # Codec decision: an explicit --codec overrides everything; otherwise
+  # bits-per-pixel at the rung's nominal 16:9 geometry and the probed frame
+  # rate decides -- under ~0.035 bpp the bitrate is starvation territory
+  # where AV1's efficiency beats h264 compatibility; above it the locked
+  # x264/x265 4k-split stands. Widths are nominal (scale=-2:H keeps source
+  # aspect), so wide sources read slightly low -- the conservative direction.
+  if [[ -n $codec_arg ]]; then
+    case "$codec_arg" in
+    h264) v_codec=libx264; preset=fast ;;
+    hevc) v_codec=libx265; preset=slow ;;
+    av1) v_codec=libsvtav1; preset=6 ;;
+    esac
   else
-    v_codec=libx264
-    preset=fast
+    case "$res" in
+    4k) rw=3840; rh=2160 ;;
+    1080p) rw=1920; rh=1080 ;;
+    720p) rw=1280; rh=720 ;;
+    540p) rw=960; rh=540 ;;
+    480p) rw=854; rh=480 ;;
+    esac
+    fps=$(video_fps "$input" || true)
+    [[ $fps =~ ^[0-9]+$ ]] || fps=25
+
+    if awk -v k="$video_kbps" -v w="$rw" -v h="$rh" -v f="$fps" \
+         'BEGIN { exit !(k * 1000 / (w * h * f) < 0.035) }'; then
+      v_codec=libsvtav1
+      preset=6
+    elif [[ $res == "4k" ]]; then
+      v_codec=libx265
+      preset=slow
+    else
+      v_codec=libx264
+      preset=fast
+    fi
   fi
 
   printf '%s %s %s %s %s %s %s\n' "$res" "$video_kbps" "$a_codec" "$a_kbps" "$v_codec" "$preset" "$container"
@@ -645,7 +655,7 @@ main() {
   local type output quality size positional=()
   local target_bytes="" target_token="" video_kbps="" requested_resolution=""
   local notify_id="" plan="" target_desc=""
-  local a_codec="" a_kbps="" v_codec="" preset="" container=""
+  local a_codec="" a_kbps="" v_codec="" preset="" container="" codec_arg=""
 
   while (( $# > 0 )); do
     case "$1" in
@@ -659,6 +669,17 @@ main() {
       (( $# > 0 )) || { echo "Missing value for --target" >&2; return 2; }
       target_bytes=$(parse_target_size "$1") || return 2
       target_token=$(numfmt --to=si "$target_bytes")
+      ;;
+    --codec)
+      shift
+      (( $# > 0 )) || { echo "Missing value for --codec" >&2; return 2; }
+      case "$1" in
+      h264 | hevc | av1) codec_arg="$1" ;;
+      *)
+        echo "Invalid --codec: $1 (expected h264, hevc, or av1)" >&2
+        return 2
+        ;;
+      esac
       ;;
     --help | -h)
       usage
@@ -717,6 +738,11 @@ main() {
 
   if [[ -n $target_bytes && $type == "picture" ]]; then
     echo "Invalid argument: --target applies to videos only" >&2
+    return 1
+  fi
+
+  if [[ -n $codec_arg && -z $target_bytes ]]; then
+    echo "Invalid argument: --codec requires --target" >&2
     return 1
   fi
 
@@ -795,7 +821,7 @@ main() {
   # makes the filename and both toasts name it for free.
   if [[ -n $target_bytes ]]; then
     requested_resolution="$resolution"
-    plan=$(plan_target "$input" "$target_bytes" "$requested_resolution")
+    plan=$(plan_target "$input" "$target_bytes" "$requested_resolution" "$codec_arg")
     read -r resolution video_kbps a_codec a_kbps v_codec preset container <<<"$plan"
     # The container becomes the effective format: extension, toasts, and the
     # done label all name it for free.
