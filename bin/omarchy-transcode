@@ -26,7 +26,7 @@ Formats:
 
 Resolutions:
   Pictures: high, medium, low
-  Videos: 4k, 1080p, 720p
+  Videos: 4k, 1080p, 720p, 540p, 480p
 
 Qualities:
   Videos: high, medium, low (default: medium)
@@ -114,6 +114,8 @@ transcode_video() {
   4k) scale='scale=-2:2160' ;;
   1080p) scale='scale=-2:1080' ;;
   720p) scale='scale=-2:720' ;;
+  540p) scale='scale=-2:540' ;;
+  480p) scale='scale=-2:480' ;;
   *)
     echo "Invalid video resolution: $resolution" >&2
     return 1
@@ -217,6 +219,8 @@ quality_token() {
 # Unknown resolution prints nothing, which drives the qualitative fallback.
 quality_kbps() {
   case "$1" in
+  480p)  case "$2" in high) echo 1200  ;; medium) echo 700 ;; low) echo 350  ;; esac ;;
+  540p)  case "$2" in high) echo 1800  ;; medium) echo 1000 ;; low) echo 500  ;; esac ;;
   720p)  case "$2" in high) echo 2500  ;; medium) echo 1500 ;; low) echo 700  ;; esac ;;
   1080p) case "$2" in high) echo 5500  ;; medium) echo 3000 ;; low) echo 1400 ;; esac ;;
   4k)    case "$2" in high) echo 16000 ;; medium) echo 9000 ;; low) echo 4500 ;; esac ;;
@@ -356,6 +360,17 @@ prompt_target_size() {
   return 1
 }
 
+# Prints the input's video height in pixels, or fails when ffprobe cannot
+# produce a numeric value -- callers then skip the no-upscale clamp rather
+# than refuse. Same probe contract as video_duration.
+video_height() {
+  local height
+  height=$(ffprobe -v error -select_streams v:0 -show_entries stream=height \
+    -of default=noprint_wrappers=1:nokey=1 "$1" 2>/dev/null || true)
+  [[ $height =~ ^[0-9]+$ ]] || return 1
+  printf '%s' "$height"
+}
+
 # The audio ladder for --target: the probed stream gets aac at the locked
 # 192k while the net budget holds that under ~25% share (net >= 768k), aac
 # 128k down to its own 25% share (net >= 512k), and libopus 56k below --
@@ -380,18 +395,21 @@ choose_audio() {
 # re-encode can only degrade it -- drop --target and pick a quality for format
 # conversion), probes duration and audio, derives the video bitrate
 # (target*8/duration/1000 with a ~2% container reserve, minus the chosen
-# audio tier), then walks the locked 2000/800/400 kbps floors stepping
-# 4k -> 1080p -> 720p until the budget fits. Prints the plan vector
+# audio tier), clamps the requested rung to at most the source height (a
+# --target run never upscales), then walks the locked 2000/800/400/250/180
+# kbps floors stepping 4k -> 1080p -> 720p -> 540p -> 480p until the budget
+# fits. Prints the plan vector
 # "<res> <v_kbps> <a_codec> <a_kbps> <v_codec> <preset> <container>" on
 # stdout; every refusal prints to stderr and returns nonzero, and cheap
 # refusals precede the probes. A negative or zero derived bitrate is not
-# special-cased -- it rides the floor loop to the 720p refusal, which IS the
+# special-cased -- it rides the floor loop to the 480p refusal, which IS the
 # audio-alone-exceeds-budget refusal, so no negative, zero, or -nan -b:v ever
 # reaches ffmpeg argv.
 plan_target() {
   local input="$1" target_bytes="$2" res="$3"
   local src_bytes duration audio_kbps video_kbps floor min_label
   local net_kbps a_codec a_kbps v_codec preset container
+  local src_height rung
 
   src_bytes=$(stat -c %s "$input" 2>/dev/null || true)
   if [[ $src_bytes =~ ^[0-9]+$ ]] && (( target_bytes >= src_bytes )); then
@@ -425,22 +443,52 @@ plan_target() {
     container=mkv
   fi
 
+  # No-upscale clamp: size-targeted output never exceeds the source height,
+  # so the requested rung steps down the same ladder to fit the source before
+  # the budget floors apply. A failed height probe skips the clamp; a source
+  # below 480p lands on 480p -- the lowest rung we ship.
+  src_height=$(video_height "$input" || true)
+  if [[ $src_height =~ ^[0-9]+$ ]]; then
+    while :; do
+      case "$res" in
+      4k) rung=2160 ;;
+      1080p) rung=1080 ;;
+      720p) rung=720 ;;
+      540p) rung=540 ;;
+      480p) rung=480 ;;
+      *) break ;;
+      esac
+      (( rung <= src_height )) && break
+      case "$res" in
+      4k) res=1080p ;;
+      1080p) res=720p ;;
+      720p) res=540p ;;
+      540p) res=480p ;;
+      *) break ;;
+      esac
+    done
+  fi
+
   while :; do
     case "$res" in
     4k) floor=2000 ;;
     1080p) floor=800 ;;
     720p) floor=400 ;;
+    540p) floor=250 ;;
+    480p) floor=180 ;;
     *) echo "Invalid video resolution: $res" >&2; return 1 ;;
     esac
     (( video_kbps >= floor )) && break
     case "$res" in
     4k) res=1080p ;;
     1080p) res=720p ;;
+    720p) res=540p ;;
+    540p) res=480p ;;
     *)
-      # Below the 720p floor: refuse naming the achievable minimum at that
+      # Below the 480p floor: refuse naming the achievable minimum at that
       # floor -- (floor + chosen audio) * duration * 125 bytes, in decimal MB.
       min_label=$(awk -v a="$a_kbps" -v d="$duration" \
-        'BEGIN { printf "%.0f MB", (400 + a) * d * 125 / 1000000 }')
+        'BEGIN { printf "%.0f MB", (180 + a) * d * 125 / 1000000 }')
       echo "Cannot fit under $(numfmt --to=si "$target_bytes") -- smallest achievable is ~$min_label for this duration" >&2
       return 1
       ;;
@@ -484,6 +532,8 @@ transcode_video_target() {
   4k) scale='scale=-2:2160' ;;
   1080p) scale='scale=-2:1080' ;;
   720p) scale='scale=-2:720' ;;
+  540p) scale='scale=-2:540' ;;
+  480p) scale='scale=-2:480' ;;
   *)
     echo "Invalid video resolution: $resolution" >&2
     return 1
@@ -636,7 +686,7 @@ main() {
     if [[ $type == "picture" ]]; then
       resolution=$(omarchy-menu-select "Select resolution" high medium low)
     else
-      resolution=$(omarchy-menu-select "Select resolution" 4k 1080p 720p)
+      resolution=$(omarchy-menu-select "Select resolution" 4k 1080p 720p 540p 480p)
     fi
   fi
 
@@ -656,7 +706,7 @@ main() {
       return 1
     fi
     case "$resolution" in
-    4k | 1080p | 720p) ;;
+    4k | 1080p | 720p | 540p | 480p) ;;
     *)
       echo "Invalid video resolution: $resolution" >&2
       return 1
