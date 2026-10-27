@@ -360,6 +360,24 @@ prompt_target_size() {
   return 1
 }
 
+# Prints the input's average frame rate as an integer, or fails when the
+# probe cannot produce one (ffprobe reports a rational like "25/1" or
+# "30000/1001"; N/A or a dead probe both fail). Callers fall back to 25 --
+# only used for the codec bpp heuristic, so a wrong-but-close fps is never
+# fatal.
+video_fps() {
+  local fps
+  fps=$(ffprobe -v error -select_streams v:0 -show_entries stream=avg_frame_rate \
+    -of default=noprint_wrappers=1:nokey=1 "$1" 2>/dev/null || true)
+  awk -v f="$fps" 'BEGIN {
+    if (f ~ /^[0-9]+\/[0-9]+$/) {
+      split(f, a, "/")
+      if (a[2] > 0) { printf "%d", a[1] / a[2] + 0.5; exit 0 }
+    }
+    exit 1
+  }'
+}
+
 # Prints the input's video height in pixels, or fails when ffprobe cannot
 # produce a numeric value -- callers then skip the no-upscale clamp rather
 # than refuse. Same probe contract as video_duration.
@@ -409,7 +427,7 @@ plan_target() {
   local input="$1" target_bytes="$2" res="$3"
   local src_bytes duration audio_kbps video_kbps floor min_label
   local net_kbps a_codec a_kbps v_codec preset container
-  local src_height rung
+  local src_height rung rw rh fps
 
   src_bytes=$(stat -c %s "$input" 2>/dev/null || true)
   if [[ $src_bytes =~ ^[0-9]+$ ]] && (( target_bytes >= src_bytes )); then
@@ -495,10 +513,27 @@ plan_target() {
     esac
   done
 
-  # The plan vector keeps encode decisions in the planner and ffmpeg argv out
-  # of it. v_codec/preset duplicate transcode_video's 4k-keyed table per the
-  # quality_token convention.
-  if [[ $res == "4k" ]]; then
+  # Codec decision: bits-per-pixel at the rung's nominal 16:9 geometry and
+  # the probed frame rate. Under ~0.035 bpp the bitrate is starvation
+  # territory where AV1's efficiency beats h264 compatibility; above it the
+  # locked x264/x265 4k-split stands. Widths are nominal (scale=-2:H keeps
+  # source aspect), so wide sources read slightly low -- the conservative
+  # direction.
+  case "$res" in
+  4k) rw=3840; rh=2160 ;;
+  1080p) rw=1920; rh=1080 ;;
+  720p) rw=1280; rh=720 ;;
+  540p) rw=960; rh=540 ;;
+  480p) rw=854; rh=480 ;;
+  esac
+  fps=$(video_fps "$input" || true)
+  [[ $fps =~ ^[0-9]+$ ]] || fps=25
+
+  if awk -v k="$video_kbps" -v w="$rw" -v h="$rh" -v f="$fps" \
+       'BEGIN { exit !(k * 1000 / (w * h * f) < 0.035) }'; then
+    v_codec=libsvtav1
+    preset=6
+  elif [[ $res == "4k" ]]; then
     v_codec=libx265
     preset=slow
   else
@@ -554,43 +589,54 @@ transcode_video_target() {
   passdir=$(mktemp -d "${TMPDIR:-/tmp}/transcode-2pass.XXXXXX")
   trap "rm -rf -- $(printf '%q' "$passdir")" EXIT
 
-  ffmpeg -i "$input" "${vargs[@]}" -pass 1 -passlogfile "$passdir/2pass" \
-    -an -f null /dev/null
+  if [[ $v_codec == "libsvtav1" ]]; then
+    # Single-pass VBR: this ffmpeg's libsvtav1 wrapper has no two-pass
+    # wiring, and the encode is fast enough that a second pass buys nothing
+    # the overshoot retry cannot recover.
+    ffmpeg -i "$input" "${vargs[@]}" "${margs[@]}" "$output"
+  else
+    ffmpeg -i "$input" "${vargs[@]}" -pass 1 -passlogfile "$passdir/2pass" \
+      -an -f null /dev/null
 
-  # One toast, replaced in place: pass 1/2 -> pass 2/2. A real if keeps the
-  # skip deliberate -- a failing [[ ]] && cmd statement would be silently
-  # inert too, but if names the intent.
-  if [[ $notify_id =~ ^[0-9]+$ ]]; then
-    omarchy-notification-send -r "$notify_id" -g  "Transcoding video…" \
-      "${desc:-$(basename -- "$input") to $container ($resolution}, pass 2/2)" || true
+    # One toast, replaced in place: pass 1/2 -> pass 2/2. A real if keeps the
+    # skip deliberate -- a failing [[ ]] && cmd statement would be silently
+    # inert too, but if names the intent.
+    if [[ $notify_id =~ ^[0-9]+$ ]]; then
+      omarchy-notification-send -r "$notify_id" -g  "Transcoding video…" \
+        "${desc:-$(basename -- "$input") to $container ($resolution}, pass 2/2)" || true
+    fi
+
+    ffmpeg -i "$input" "${vargs[@]}" -pass 2 -passlogfile "$passdir/2pass" \
+      "${margs[@]}" "$output"
   fi
 
-  ffmpeg -i "$input" "${vargs[@]}" -pass 2 -passlogfile "$passdir/2pass" \
-    "${margs[@]}" "$output"
-
-  # Any byte-over target triggers exactly one pass-2-only retry at a
-  # tightened bitrate -- video_kbps scaled by target/actual, resolution and
-  # audio fixed (re-planning could silently move resolution after
-  # the filename and toasts committed to it). The retry encodes to a passdir
-  # sibling -- unique, so no -y is ever needed -- and mv's onto $output only
-  # on success, so a failed retry preserves the overshot-but-playable first
-  # output. The done toast reports the stat-measured actual size either way;
-  # that honest hit/miss report is the point of the feature.
+  # Any byte-over target triggers exactly one retry at a tightened bitrate
+  # -- video_kbps scaled by target/actual, resolution and audio fixed
+  # (re-planning could silently move resolution after the filename and
+  # toasts committed to it). Two-pass codecs reuse the pass-1 log for the
+  # retry; single-pass codecs just re-encode fresh. The retry encodes to a
+  # passdir sibling -- unique, so no -y is ever needed -- and mv's onto
+  # $output only on success, so a failed retry preserves the
+  # overshot-but-playable first output. The done toast reports the
+  # stat-measured actual size either way; that honest hit/miss report is
+  # the point of the feature.
   actual=$(stat -c %s "$output" 2>/dev/null || true)
   if [[ $actual =~ ^[0-9]+$ ]] && (( actual > target_bytes )); then
     retry_kbps=$(awk -v k="$video_kbps" -v t="$target_bytes" -v a="$actual" \
       'BEGIN { printf "%d", k * t / a }')
     if [[ $retry_kbps =~ ^[0-9]+$ ]] && (( retry_kbps > 0 )); then
       rargs=(-vf "$scale" -c:v "$v_codec" -preset "$preset" -b:v "${retry_kbps}k")
-      if ffmpeg -i "$input" "${rargs[@]}" -pass 2 -passlogfile "$passdir/2pass" \
-           "${margs[@]}" "$passdir/retry.$container"; then
+      if [[ $v_codec != "libsvtav1" ]]; then
+        rargs+=(-pass 2 -passlogfile "$passdir/2pass")
+      fi
+      if ffmpeg -i "$input" "${rargs[@]}" "${margs[@]}" "$passdir/retry.$container"; then
         mv -f -- "$passdir/retry.$container" "$output"
       fi
     fi
   fi
 
-  # The retry reuses the passlog, so the explicit cleanup waits until here;
-  # the EXIT trap stays armed as the failure-path backstop.
+  # The two-pass retry reuses the passlog, so the explicit cleanup waits
+  # until here; the EXIT trap stays armed as the failure-path backstop.
   rm -rf "$passdir"
 }
 
@@ -768,7 +814,15 @@ main() {
         target_desc+=" — stepped down from $requested_resolution"
       fi
       target_desc+=", target ≤$target_token"
-      notify_id=$(omarchy-notification-send -p -g  "Transcoding video…" "$target_desc, pass 1/2)")
+      # Two-pass codecs get a pass counter on the start toast (replaced in
+      # place by pass 2/2); single-pass codecs encode once, so there is no
+      # counter to update.
+      if [[ $v_codec == "libsvtav1" ]]; then
+        pass_label=""
+      else
+        pass_label=", pass 1/2"
+      fi
+      notify_id=$(omarchy-notification-send -p -g  "Transcoding video…" "$target_desc$pass_label)")
       transcode_video_target "$input" "$resolution" "$output" "$video_kbps" \
         "$a_codec" "$a_kbps" "$v_codec" "$preset" "$container" \
         "$target_bytes" "$notify_id" "$target_desc"

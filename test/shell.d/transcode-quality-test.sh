@@ -91,9 +91,18 @@ case " $* " in
   exit "${FAKE_ENCODE_RC:-0}"
   ;;
 *)
+  # Non-two-pass encodes (single-pass codecs, quality tiers, pictures):
+  # out= lines double as the per-invocation counter, so a multi-encode run
+  # (the overshoot retry) takes FAKE_OUT_BYTES first and FAKE_OUT_BYTES2
+  # later -- same convention as the pass-2 arm.
   printf 'out=%q\n' "${!#}" >>"$CALLS"
-  if [[ -n ${FAKE_OUT_BYTES:-} ]]; then
-    truncate -s "$FAKE_OUT_BYTES" "${!#}"
+  n=$(grep -c '^out=' "$CALLS")
+  size="${FAKE_OUT_BYTES:-}"
+  if (( n > 1 )) && [[ -n ${FAKE_OUT_BYTES2:-} ]]; then
+    size="$FAKE_OUT_BYTES2"
+  fi
+  if [[ -n $size ]]; then
+    truncate -s "$size" "${!#}"
   fi
   exit "${FAKE_ENCODE_RC:-0}"
   ;;
@@ -186,6 +195,13 @@ case " $* " in
 *" stream=height "*)
   if [[ -n ${FAKE_HEIGHT+x} ]]; then
     printf '%s\n' "$FAKE_HEIGHT"
+    exit 0
+  fi
+  exit 1
+  ;;
+*" stream=avg_frame_rate "*)
+  if [[ -n ${FAKE_FPS+x} ]]; then
+    printf '%s\n' "$FAKE_FPS"
     exit 0
   fi
   exit 1
@@ -821,12 +837,12 @@ ffmpeg_line=$(grep -n '^ffmpeg ' "$calls" | head -n1 | cut -d: -f1 || true)
   fail "the --target start toast precedes the encode" "$(cat "$calls")"
 pass "a --target run scopes its toast per pass on one notification id"
 
-# --target probes exactly three times (duration + audio presence + source
-# height for the clamp) -- the positive twin of the tier run's never-probes
-# pin.
-[[ $(grep -c '^ffprobe:' "$calls") -eq 3 ]] ||
-  fail "a --target run probes exactly three times" "$(cat "$calls")"
-pass "a --target run probes exactly three times"
+# --target probes exactly four times (duration + audio presence + source
+# height + frame rate for the codec heuristic) -- the positive twin of the
+# tier run's never-probes pin.
+[[ $(grep -c '^ffprobe:' "$calls") -eq 4 ]] ||
+  fail "a --target run probes exactly four times" "$(cat "$calls")"
+pass "a --target run probes exactly four times"
 
 # All four slots supplied plus --target: zero menus, and the quality menu in
 # particular is skipped entirely.
@@ -874,14 +890,18 @@ pass "a missing --target value exits 2 with an empty call log"
 
 # Step-down: a 4k request on a 10M/60s budget derives 1114k -- below the 4k
 # floor (2000k) but above 1080p's (800k) -- so the run steps to 1080p and the
-# filename and toasts all name the effective rung with the disclosure.
+# filename and toasts all name the effective rung with the disclosure. At
+# 1114k/25fps 1080p is starvation bpp (0.0215), so the codec heuristic picks
+# single-pass AV1.
 FAKE_DURATION=60 run_transcode "$TMPDIR/in.mov" mp4 4k --target 10M
 grep -Fx "out=$TMPDIR/in-1080p-10M.mp4" "$calls" >/dev/null ||
   fail "a 10M target at 4k steps down to the -1080p-10M name" "$(cat "$calls")"
-grep ' -pass 2 ' "$calls" | grep -F 'scale=-2:1080' >/dev/null ||
+grep '^ffmpeg ' "$calls" | grep -F 'scale=-2:1080' >/dev/null ||
   fail "a stepped-down run encodes at 1080p" "$(cat "$calls")"
-grep ' -pass 2 ' "$calls" | grep -F -- '-b:v 1114k' >/dev/null ||
+grep '^ffmpeg ' "$calls" | grep -F -- '-b:v 1114k' >/dev/null ||
   fail "a stepped-down run derives -b:v 1114k" "$(cat "$calls")"
+grep '^ffmpeg ' "$calls" | grep -F -- '-c:v libsvtav1 -preset 6' >/dev/null ||
+  fail "a starvation-bpp run picks single-pass AV1" "$(cat "$calls")"
 grep 'notification:' "$calls" | grep -F '1080p' |
   grep -F 'stepped down from 4k' | grep -F '10M' >/dev/null ||
   fail "the start toast names the effective rung, the step-down, and the target" "$(cat "$calls")"
@@ -896,22 +916,25 @@ pass "a 4k request on a 10M budget steps down to 1080p and says so"
 FAKE_DURATION=60 run_transcode "$TMPDIR/in.mov" mp4 4k --target 5M
 grep -Fx "out=$TMPDIR/in-720p-5.0M.mp4" "$calls" >/dev/null ||
   fail "a 5M target at 4k steps down to the -720p-5.0M name" "$(cat "$calls")"
-grep ' -pass 2 ' "$calls" | grep -F 'scale=-2:720' >/dev/null ||
+grep '^ffmpeg ' "$calls" | grep -F 'scale=-2:720' >/dev/null ||
   fail "a 5M target encodes at 720p" "$(cat "$calls")"
-grep ' -pass 2 ' "$calls" | grep -F -- '-b:v 525k' >/dev/null ||
+grep '^ffmpeg ' "$calls" | grep -F -- '-b:v 525k' >/dev/null ||
   fail "a 5M target derives -b:v 525k" "$(cat "$calls")"
-grep ' -pass 2 ' "$calls" | grep -F -- '-c:a aac -b:a 128k' >/dev/null ||
+grep '^ffmpeg ' "$calls" | grep -F -- '-c:a aac -b:a 128k' >/dev/null ||
   fail "a 5M target steps the audio ladder to aac 128k" "$(cat "$calls")"
+grep '^ffmpeg ' "$calls" | grep -F -- '-c:v libsvtav1' >/dev/null ||
+  fail "a 5M target picks AV1 at starvation bpp" "$(cat "$calls")"
 pass "a 4k request on a 5M budget steps down to 720p on the aac 128k tier"
 
 # Boundary: 25M/60s derives 3074k, at or above the 4k floor, so a 4k request
-# stays at 4k on libx265 -preset slow.
+# stays at 4k -- but even 3074k is starvation bpp at 2160p (0.0148), so the
+# codec heuristic picks single-pass AV1 over the x265/slow pair.
 FAKE_DURATION=60 run_transcode "$TMPDIR/in.mov" mp4 4k --target 25M
-grep ' -pass 2 ' "$calls" | grep -F 'scale=-2:2160' >/dev/null ||
+grep '^ffmpeg ' "$calls" | grep -F 'scale=-2:2160' >/dev/null ||
   fail "a 25M target at 4k keeps the 4k scale" "$(cat "$calls")"
-grep ' -pass 2 ' "$calls" | grep -F -- '-c:v libx265 -preset slow' >/dev/null ||
-  fail "a 25M target at 4k keeps the x265 codec" "$(cat "$calls")"
-grep ' -pass 2 ' "$calls" | grep -F -- '-b:v 3074k' >/dev/null ||
+grep '^ffmpeg ' "$calls" | grep -F -- '-c:v libsvtav1 -preset 6' >/dev/null ||
+  fail "a 25M target at 4k picks AV1 at starvation bpp" "$(cat "$calls")"
+grep '^ffmpeg ' "$calls" | grep -F -- '-b:v 3074k' >/dev/null ||
   fail "a 25M target at 4k derives -b:v 3074k" "$(cat "$calls")"
 grep -Fx "out=$TMPDIR/in-4k-25M.mp4" "$calls" >/dev/null ||
   fail "a 25M target at 4k writes the -4k-25M name" "$(cat "$calls")"
@@ -1000,7 +1023,7 @@ grep '^menu-select:' "$calls" | grep -F 'Select resolution' >/dev/null ||
   fail "an unset resolution still prompts under --target" "$(cat "$calls")"
 grep -Fx "out=$TMPDIR/in-720p-5.0M.mp4" "$calls" >/dev/null ||
   fail "a 4k menu pick on a 5M budget steps down to -720p-5.0M" "$(cat "$calls")"
-grep ' -pass 2 ' "$calls" | grep -F 'scale=-2:720' >/dev/null ||
+grep '^ffmpeg ' "$calls" | grep -F 'scale=-2:720' >/dev/null ||
   fail "a stepped-down menu pick encodes at 720p" "$(cat "$calls")"
 pass "an unset resolution prompts as the planner ceiling under --target"
 
@@ -1099,11 +1122,11 @@ pass "failed, N/A, and zero durations all refuse before any notification"
 # returns none/0 from the ladder, so 5M/60s at a 4k request derives the full
 # 653k -- and the producing pass carries no audio args at all.
 FAKE_AUDIO=no FAKE_DURATION=60 run_transcode "$TMPDIR/in.mov" mp4 4k --target 5M
-grep ' -pass 2 ' "$calls" | grep -F 'scale=-2:720' >/dev/null ||
+grep '^ffmpeg ' "$calls" | grep -F 'scale=-2:720' >/dev/null ||
   fail "a no-audio 5M target still steps to 720p" "$(cat "$calls")"
-grep ' -pass 2 ' "$calls" | grep -F -- '-b:v 653k' >/dev/null ||
+grep '^ffmpeg ' "$calls" | grep -F -- '-b:v 653k' >/dev/null ||
   fail "a no-audio 5M target derives -b:v 653k" "$(cat "$calls")"
-if grep ' -pass 2 ' "$calls" | grep -F -- '-c:a' >/dev/null; then
+if grep '^ffmpeg ' "$calls" | grep -F -- '-c:a' >/dev/null; then
   fail "a no-audio target emits no audio encode args" "$(cat "$calls")"
 fi
 pass "a proven-audio-less source frees the whole budget and skips audio args"
@@ -1115,11 +1138,11 @@ pass "a proven-audio-less source frees the whole budget and skips audio args"
 FAKE_DURATION=60 run_transcode "$TMPDIR/in.mov" mp4 4k --target 3.9M
 grep -Fx "out=$TMPDIR/in-720p-3.9M.mkv" "$calls" >/dev/null ||
   fail "an opus-tier target writes the -3.9M.mkv name" "$(cat "$calls")"
-grep ' -pass 2 ' "$calls" | grep -F -- '-b:v 453k' >/dev/null ||
+grep '^ffmpeg ' "$calls" | grep -F -- '-b:v 453k' >/dev/null ||
   fail "an opus-tier target derives -b:v 453k" "$(cat "$calls")"
-grep ' -pass 2 ' "$calls" | grep -F -- '-c:a libopus -b:a 56k' >/dev/null ||
+grep '^ffmpeg ' "$calls" | grep -F -- '-c:a libopus -b:a 56k' >/dev/null ||
   fail "an opus-tier target encodes audio as libopus 56k" "$(cat "$calls")"
-if grep ' -pass 2 ' "$calls" | grep -F -- '-movflags' >/dev/null; then
+if grep '^ffmpeg ' "$calls" | grep -F -- '-movflags' >/dev/null; then
   fail "an mkv output never carries -movflags" "$(cat "$calls")"
 fi
 grep 'notification:' "$calls" | grep -F 'to mkv' >/dev/null ||
@@ -1134,9 +1157,9 @@ pass "a sub-512k budget drops to opus 56k and ships mkv"
 FAKE_DURATION=60 run_transcode "$TMPDIR/in.mov" mp4 4k --target 4M
 grep -Fx "out=$TMPDIR/in-540p-4.0M.mp4" "$calls" >/dev/null ||
   fail "a 4M target steps down to the -540p-4.0M name" "$(cat "$calls")"
-grep ' -pass 2 ' "$calls" | grep -F 'scale=-2:540' >/dev/null ||
+grep '^ffmpeg ' "$calls" | grep -F 'scale=-2:540' >/dev/null ||
   fail "a 4M target encodes at 540p" "$(cat "$calls")"
-grep ' -pass 2 ' "$calls" | grep -F -- '-b:v 394k' >/dev/null ||
+grep '^ffmpeg ' "$calls" | grep -F -- '-b:v 394k' >/dev/null ||
   fail "a 4M target derives -b:v 394k" "$(cat "$calls")"
 grep 'notification:' "$calls" | grep -F '540p' |
   grep -F 'stepped down from 4k' >/dev/null ||
@@ -1149,9 +1172,9 @@ pass "a sub-720p-floor budget steps through 720p to 540p"
 FAKE_DURATION=60 run_transcode "$TMPDIR/in.mov" mp4 4k --target 2.2M
 grep -Fx "out=$TMPDIR/in-480p-2.2M.mkv" "$calls" >/dev/null ||
   fail "a 2.2M target steps down to the -480p-2.2M.mkv name" "$(cat "$calls")"
-grep ' -pass 2 ' "$calls" | grep -F 'scale=-2:480' >/dev/null ||
+grep '^ffmpeg ' "$calls" | grep -F 'scale=-2:480' >/dev/null ||
   fail "a 2.2M target encodes at 480p" "$(cat "$calls")"
-grep ' -pass 2 ' "$calls" | grep -F -- '-b:v 231k' >/dev/null ||
+grep '^ffmpeg ' "$calls" | grep -F -- '-b:v 231k' >/dev/null ||
   fail "a 2.2M target derives -b:v 231k" "$(cat "$calls")"
 rm -f "$TMPDIR/in-480p-2.2M.mkv"
 pass "a sub-540p-floor budget lands on 480p"
@@ -1176,6 +1199,63 @@ grep ' -pass 2 ' "$calls" | grep -F 'scale=-2:720' >/dev/null ||
   fail "a 720px source keeps a 720p request" "$(cat "$calls")"
 rm -f "$TMPDIR/in-720p-25M.mp4"
 pass "a source at the requested height is not clamped"
+
+# --- --target: AV1 single-pass arm ---------------------------------------
+# A starvation-bpp run (5M/60s -> 525k at 720p, 0.023 bpp) encodes once:
+# exactly one ffmpeg call, no -pass or -passlogfile anywhere, and the start
+# toast carries no pass counter to update.
+FAKE_DURATION=60 run_transcode "$TMPDIR/in.mov" mp4 4k --target 5M
+[[ $(grep -c '^ffmpeg ' "$calls") -eq 1 ]] ||
+  fail "an AV1 run makes exactly one ffmpeg call" "$(cat "$calls")"
+if grep -F -- '-pass' "$calls" >/dev/null; then
+  fail "an AV1 argv never carries pass flags" "$(cat "$calls")"
+fi
+grep '^ffmpeg ' "$calls" | grep -F -- '-c:v libsvtav1 -preset 6' >/dev/null ||
+  fail "an AV1 run encodes with libsvtav1 preset 6" "$(cat "$calls")"
+if grep 'notification:' "$calls" | grep -F 'pass 1/2' >/dev/null; then
+  fail "a single-pass run never claims a pass counter" "$(cat "$calls")"
+fi
+rm -f "$TMPDIR/in-720p-5.0M.mp4"
+pass "an AV1 run encodes single-pass with no pass flags or counter"
+
+# The overshoot retry generalizes to single-pass codecs: a fresh encode at
+# the tightened bitrate lands on the output path. 5M/60s derives 525k; an
+# overshot first file of 5242881 B tightens to 525*5000000/5242881 = 500k.
+FAKE_OUT_BYTES=5242881 FAKE_OUT_BYTES2=4718592 FAKE_DURATION=60 \
+  run_transcode "$TMPDIR/in.mov" mp4 4k --target 5M
+[[ $(grep -c '^ffmpeg ' "$calls") -eq 2 ]] ||
+  fail "an AV1 overshoot makes exactly two single-pass calls" "$(cat "$calls")"
+[[ $(grep -c '^ffmpeg .*retry\.mp4' "$calls") -eq 1 ]] ||
+  fail "an AV1 overshoot retries exactly once" "$(cat "$calls")"
+grep '^ffmpeg .*retry\.mp4' "$calls" | grep -F -- '-b:v 500k' >/dev/null ||
+  fail "the AV1 retry tightens to -b:v 500k" "$(cat "$calls")"
+if grep '^ffmpeg .*retry\.mp4' "$calls" | grep -F -- '-pass' >/dev/null; then
+  fail "the AV1 retry stays single-pass" "$(cat "$calls")"
+fi
+[[ $(stat -c %s "$TMPDIR/in-720p-5.0M.mp4") -eq 4718592 ]] ||
+  fail "the AV1 retry result lands on the output path" \
+    "$(stat -c %s "$TMPDIR/in-720p-5.0M.mp4")"
+if find "$TMPDIR" -name '*2pass*' -print -quit | grep -q .; then
+  fail "an AV1 run leaves no passlog artifacts" \
+    "$(find "$TMPDIR" -name '*2pass*')"
+fi
+rm -f "$TMPDIR/in-720p-5.0M.mp4"
+pass "an AV1 overshoot retries once as a fresh single-pass encode"
+
+# fps feeds the heuristic: the same 525k budget at 50fps doubles the pixel
+# rate, so the same run reads even lower bpp -- and at 10fps a 1080p run
+# clears the 0.035 line and keeps x264. fps probe failure falls back to 25.
+FAKE_FPS=30000/1001 FAKE_DURATION=60 run_transcode "$TMPDIR/in.mov" mp4 4k --target 5M
+grep '^ffmpeg ' "$calls" | grep -F -- '-c:v libsvtav1' >/dev/null ||
+  fail "a 30fps starvation run still picks AV1" "$(cat "$calls")"
+rm -f "$TMPDIR/in-720p-5.0M.mp4"
+FAKE_FPS=10/1 FAKE_DURATION=60 run_transcode "$TMPDIR/in.mov" mp4 4k --target 10M
+grep '^ffmpeg ' "$calls" | grep -F -- '-c:v libx264 -preset fast' >/dev/null ||
+  fail "a 10fps run clears the bpp line and keeps x264" "$(cat "$calls")"
+[[ $(grep -c ' -pass 1 ' "$calls") -eq 1 ]] ||
+  fail "an above-threshold run two-passes" "$(cat "$calls")"
+rm -f "$TMPDIR/in-1080p-10M.mp4"
+pass "the frame rate probe moves the codec decision at the margin"
 
 # The never-probes pin holds: a four-positional tier run never calls
 # plan_target, so no ffprobe or menu lines appear.
@@ -1362,12 +1442,12 @@ rm -f "$TMPDIR/in-1080p-25M.mp4"
 FAKE_DURATION=60 run_transcode "$TMPDIR/in.mov" mp4 1080p --target 25M
 grep -E '^(ffmpeg |notification:)' "$calls" |
   sed 's|transcode-2pass\.[^/ ]*|transcode-2pass.X|' >"$TMPDIR/parity-cli"
-[[ $(grep -c '^ffprobe:' "$calls") -eq 3 ]] ||
-  fail "the --target baseline probes exactly three times" "$(cat "$calls")"
+[[ $(grep -c '^ffprobe:' "$calls") -eq 4 ]] ||
+  fail "the --target baseline probes exactly four times" "$(cat "$calls")"
 if grep -q '^menu-select:' "$calls" || grep -q '^menu-input:' "$calls"; then
   fail "the --target baseline never prompts" "$(cat "$calls")"
 fi
-pass "a --target 25M run never prompts and probes exactly three times"
+pass "a --target 25M run never prompts and probes exactly four times"
 
 # The Custom run's encode is byte-identical to the CLI run's -- same two-pass
 # argv, same toast text; only the menu plumbing and the two menu-estimate
@@ -1384,8 +1464,8 @@ grep -Fx "out=$TMPDIR/in-1080p-25M.mp4" "$TMPDIR/calls-custom" >/dev/null ||
   fail "a Custom pick fires the input prompt exactly once" "$(cat "$TMPDIR/calls-custom")"
 grep -Fx 'menu-input: Target size (e.g. 25M)' "$TMPDIR/calls-custom" >/dev/null ||
   fail "the input prompt carries its locked text" "$(cat "$TMPDIR/calls-custom")"
-[[ $(grep -c '^ffprobe:' "$TMPDIR/calls-custom") -eq 5 ]] ||
-  fail "a Custom run probes 5 times (2 menu estimates + 3 planner)" \
+[[ $(grep -c '^ffprobe:' "$TMPDIR/calls-custom") -eq 6 ]] ||
+  fail "a Custom run probes 6 times (2 menu estimates + 4 planner)" \
     "$(cat "$TMPDIR/calls-custom")"
 pass "a Custom size pick encodes byte-identically to --target 25M"
 
