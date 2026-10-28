@@ -356,22 +356,23 @@ select_quality() {
 }
 
 # The interactive container pick, shown only inside the Custom-size flow:
-# "auto" lets the planner pick by the audio it chose (mp4 for aac, mkv for
-# opus), mp4 forces an aac-compatible output for players that reject the
-# exotic combinations, mkv keeps every codec pairing on the table. auto is
-# pre-highlighted so Enter keeps the default; Esc cancels like every other
-# prompt; the label is stripped and re-validated like select_quality's.
+# "auto" lets the planner pair audio and container by budget (aac -> mp4,
+# opus -> mkv), mp4 constrains the ladder to aac for players that reject
+# the exotic pairings. mkv earns no row -- auto already emits it when the
+# budget starves, and forcing it past that is niche enough to stay flag-
+# only (--container mkv). auto is pre-highlighted so Enter keeps the
+# default; Esc cancels like every other prompt; the label is stripped and
+# re-validated like select_quality's.
 select_container() {
   local selection
   selection=$(omarchy-menu-select "Select container" \
     auto "Let the plan decide" \
-    mp4 "Best player support" \
-    mkv "Every codec welcome" -- --default-index 0) || return
+    mp4 "Best player support" -- --default-index 0) || return
   selection="${selection%%$'\t'*}"
   case "$selection" in
-  auto | mp4 | mkv) printf '%s' "$selection" ;;
+  auto | mp4) printf '%s' "$selection" ;;
   *)
-    echo "Invalid container choice: $selection (expected auto, mp4, or mkv)" >&2
+    echo "Invalid container choice: $selection (expected auto or mp4)" >&2
     return 1
     ;;
   esac
