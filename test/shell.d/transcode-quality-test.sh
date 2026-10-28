@@ -1482,7 +1482,7 @@ FAKE_PICK=$'Custom size…\tEnter a size like 25M' FAKE_INPUT=5M FAKE_DURATION=6
   FAKE_PICK_CONTAINER=$'auto\tSmallest result (may be .mkv)' run_transcode "$TMPDIR/in.mov" mp4 720p
 grep -F 'auto' "$calls" | grep -F 'mp4' >/dev/null ||
   fail "the container menu offers the auto and mp4 rows" "$(cat "$calls")"
-if grep -F 'mkv' "$calls" >/dev/null; then
+if grep -E 'Select container.* mkv ' "$calls" >/dev/null; then
   fail "mkv earns no menu row -- flag-only" "$(cat "$calls")"
 fi
 rm -f "$TMPDIR/in-720p-5.0M.mp4"
