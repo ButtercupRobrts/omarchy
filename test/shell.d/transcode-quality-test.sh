@@ -1470,18 +1470,22 @@ pass "unknown or missing --audio values exit 2"
 # size answer, before the planner. Ordinary tier runs and every CLI path
 # keep the ladder's automatic answer with zero new prompts.
 FAKE_PICK=$'Custom size…\tEnter a size like 25M' FAKE_INPUT=3.7M FAKE_DURATION=60 \
-  FAKE_PICK_CONTAINER=$'mkv\tEvery codec welcome' run_transcode "$TMPDIR/in.mov" mp4 720p
-grep -E '^menu-select: Select container' "$calls" >/dev/null ||
-  fail "a Custom-size run fires the container pick" "$(cat "$calls")"
-grep -F 'auto' "$calls" | grep -F 'mp4' | grep -F 'mkv' >/dev/null ||
-  fail "the container menu offers all three rows" "$(cat "$calls")"
+  run_transcode "$TMPDIR/in.mov" mp4 720p --container mkv
 grep -Fx "out=$TMPDIR/in-720p-3.7M.mkv" "$calls" >/dev/null ||
-  fail "a menu mkv pick writes the .mkv name" "$(cat "$calls")"
+  fail "--container mkv writes the .mkv name" "$(cat "$calls")"
 grep '^ffmpeg ' "$calls" | grep -F -- '-c:a libopus -b:a 56k' >/dev/null ||
-  fail "a menu mkv pick keeps the opus ladder" "$(cat "$calls")"
+  fail "--container mkv keeps the opus ladder" "$(cat "$calls")"
 grep '^ffmpeg ' "$calls" | grep -F -- '-b:v 427k' >/dev/null ||
-  fail "a menu mkv pick plans -b:v 427k" "$(cat "$calls")"
+  fail "--container mkv plans -b:v 427k" "$(cat "$calls")"
 rm -f "$TMPDIR/in-720p-3.7M.mkv"
+FAKE_PICK=$'Custom size…\tEnter a size like 25M' FAKE_INPUT=5M FAKE_DURATION=60 \
+  FAKE_PICK_CONTAINER=$'auto\tLet the plan decide' run_transcode "$TMPDIR/in.mov" mp4 720p
+grep -F 'auto' "$calls" | grep -F 'mp4' >/dev/null ||
+  fail "the container menu offers the auto and mp4 rows" "$(cat "$calls")"
+if grep -F 'mkv' "$calls" >/dev/null; then
+  fail "mkv earns no menu row -- flag-only" "$(cat "$calls")"
+fi
+rm -f "$TMPDIR/in-720p-5.0M.mp4"
 pass "the Custom-size container pick steers the plan"
 
 # An unfaked container menu defaults to auto -- the planner's own answer, so the
