@@ -350,7 +350,32 @@ select_quality() {
     return 1
     ;;
   esac
+
   printf '%s' "$selection"
+}
+
+# The interactive audio pick, shown only on runs that already entered the
+# menus and only for containers that carry audio: "auto" defers to the
+# ladder (aac at generous budgets, opus under starvation, silent when there
+# is no stream), the rest pin a codec outright -- opus keeps its mkv
+# container rule, none emits -an. auto is pre-highlighted so Enter keeps the
+# default, and Esc cancels like every other prompt. The label is stripped
+# and re-validated here the same way select_quality's is.
+select_audio() {
+  local selection
+  selection=$(omarchy-menu-select "Select audio" \
+    auto "Let the budget decide" \
+    aac "Best player support" \
+    opus "Smallest (mkv)" \
+    none "No audio" -- --default-index 0) || return
+  selection="${selection%%$'\t'*}"
+  case "$selection" in
+  auto | aac | opus | none) printf '%s' "$selection" ;;
+  *)
+    echo "Invalid audio choice: $selection (expected auto, aac, opus, or none)" >&2
+    return 1
+    ;;
+  esac
 }
 
 # Human-readable size of a finished output ("38 MB"), or fails when stat
@@ -722,7 +747,7 @@ main() {
   local target_bytes="" target_token="" video_kbps="" requested_resolution=""
   local notify_id="" plan="" target_desc=""
   local a_codec="" a_kbps="" v_codec="" preset="" container="" codec_arg=""
-  local audio_arg=""
+  local audio_arg="" interactive=""
 
   while (( $# > 0 )); do
     case "$1" in
@@ -787,6 +812,7 @@ main() {
   search_path="${search_path:-$HOME/Pictures:$HOME/Videos}"
 
   if [[ -z $input ]]; then
+    interactive=1
     input=$(omarchy-menu-file "Transcode picture or video" "$search_path" "jpg jpeg png webp gif heic avif mp4 mov m4v mkv webm avi")
   fi
 
@@ -828,6 +854,7 @@ main() {
   fi
 
   if [[ -z $format ]]; then
+    interactive=1
     if [[ $type == "picture" ]]; then
       format=$(omarchy-menu-select "Select format" jpg png)
     else
@@ -836,6 +863,7 @@ main() {
   fi
 
   if [[ -z $resolution ]]; then
+    interactive=1
     if [[ $type == "picture" ]]; then
       resolution=$(omarchy-menu-select "Select resolution" high medium low)
     else
@@ -893,6 +921,7 @@ main() {
   fi
 
   if [[ $type == "video" && -z $quality && -z $target_bytes ]]; then
+    interactive=1
     quality=$(select_quality "$input" "$format" "$resolution" "$codec_arg")
     # A Custom size… pick returns target:<bytes> -- unwrap into the same two
     # variables --target sets, so the planner block, output_path, and the
@@ -903,6 +932,17 @@ main() {
         { echo "Invalid target size: $target_bytes" >&2; return 1; }
       target_token=$(numfmt --to=si "$target_bytes")
       quality=""
+    fi
+  fi
+
+  # The interactive audio pick fires only on runs that already entered the
+  # menus -- a fully-positional CLI run never sees it -- and only where the
+  # output carries audio (a menu-picked gif skips it). --audio wins when
+  # given; "auto" restores the planner's default either way.
+  if [[ $type == "video" && $format != "gif" && -z $audio_arg && -n $interactive ]]; then
+    audio_arg=$(select_audio) || return
+    if [[ $audio_arg == "auto" ]]; then
+      audio_arg=""
     fi
   fi
 

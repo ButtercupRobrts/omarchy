@@ -145,11 +145,26 @@ done
 cat >"$STUB_DIR/omarchy-menu-select" <<'SH'
 #!/bin/bash
 printf 'menu-select: %s\n' "$*" >>"$CALLS"
-if [[ -z ${FAKE_PICK+x} ]]; then
+# The audio menu is the only prompt with a safe unfaked answer: auto is the
+# script's own default, so an unset FAKE_PICK_AUDIO means "accept the
+# default" -- FAKE_PICK values for other menus are never valid audio labels
+# and must not leak into this prompt.
+if [[ $* == *"Select audio"* ]]; then
+  # ${x+x} not ${x:-auto}: set-but-empty must stay empty so an Esc fake
+  # reaches the [[ -n $pick ]] guard below instead of falling back to auto.
+  if [[ -n ${FAKE_PICK_AUDIO+x} ]]; then
+    pick="$FAKE_PICK_AUDIO"
+  else
+    pick="auto"
+  fi
+else
+  pick="${FAKE_PICK-}"
+fi
+if [[ $* != *"Select audio"* ]] && [[ -z ${FAKE_PICK+x} ]]; then
   exit 1
 fi
-[[ -n $FAKE_PICK ]] || exit 1
-printf '%s' "$FAKE_PICK"
+[[ -n $pick ]] || exit 1
+printf '%s' "$pick"
 SH
 
 # omarchy-menu-input mirrors the real binary's three states: a set FAKE_INPUT
@@ -1449,6 +1464,65 @@ run_transcode "$TMPDIR/in.mov" mp4 1080p --target 25M --audio || status=$?
 grep -F 'Missing value for --audio' "$TMPDIR/stderr" >/dev/null ||
   fail "a missing --audio value reports on stderr" "$(cat "$TMPDIR/stderr")"
 pass "unknown or missing --audio values exit 2"
+
+# --- interactive Select audio ----------------------------------------------
+# On a menu-driven run (any earlier prompt fired -- here the quality menu),
+# the audio pick runs once. The rows are locked: auto/aac/opus/none with
+# auto pre-highlighted; a foreign pick dies inside select_audio.
+FAKE_PICK=$'medium\tCRF 23 · ~24 MB' FAKE_PICK_AUDIO=$'opus\tSmallest (mkv)' \
+  run_transcode "$TMPDIR/in.mov" mp4 720p
+grep -E '^menu-select: Select audio' "$calls" >/dev/null ||
+  fail "an interactive run fires the audio pick" "$(cat "$calls")"
+grep -F 'auto' "$calls" | grep -F 'opus' | grep -F 'none' >/dev/null ||
+  fail "the audio menu offers all four rows" "$(cat "$calls")"
+grep -Fx "out=$TMPDIR/in-720p.mkv" "$calls" >/dev/null ||
+  fail "a menu opus pick writes the .mkv name" "$(cat "$calls")"
+grep '^ffmpeg ' "$calls" | grep -F -- '-c:a libopus -b:a 56k' >/dev/null ||
+  fail "a menu opus pick encodes libopus" "$(cat "$calls")"
+rm -f "$TMPDIR/in-720p.mkv"
+pass "the interactive audio pick steers the encode"
+
+# An unfaked audio menu defaults to auto -- the planner's own answer, so the
+# encode is indistinguishable from a run without the pick.
+FAKE_PICK=$'medium\tCRF 23 · ~24 MB' FAKE_DURATION=60 \
+  run_transcode "$TMPDIR/in.mov" mp4 720p
+grep '^ffmpeg ' "$calls" | grep -F -- '-c:a aac -b:a 192k' >/dev/null ||
+  fail "an auto audio pick keeps the aac 192k default" "$(cat "$calls")"
+rm -f "$TMPDIR/in-720p.mp4"
+pass "the audio menu's auto pick is the planner default"
+
+# Esc at the audio menu cancels before the notification, same as every
+# other prompt.
+status=0
+FAKE_PICK=$'medium\tCRF 23 · ~24 MB' FAKE_PICK_AUDIO='' \
+  run_transcode "$TMPDIR/in.mov" mp4 720p || status=$?
+[[ $status -ne 0 ]] ||
+  fail "Esc at the audio menu cancels"
+if grep -q 'notification:' "$calls" || grep -q '^ffmpeg ' "$calls"; then
+  fail "Esc at the audio menu cancels before the notification" "$(cat "$calls")"
+fi
+pass "Esc at the audio menu cancels before the notification"
+
+# --audio pins it before the menu can fire: an interactive run with the
+# flag never shows Select audio.
+FAKE_PICK=$'medium\tCRF 23 · ~24 MB' \
+  run_transcode "$TMPDIR/in.mov" mp4 720p --audio none
+if grep -q 'Select audio' "$calls"; then
+  fail "--audio suppresses the interactive pick" "$(cat "$calls")"
+fi
+grep '^ffmpeg ' "$calls" | grep -F -- '-an' >/dev/null ||
+  fail "--audio none still encodes silent" "$(cat "$calls")"
+rm -f "$TMPDIR/in-720p.mp4"
+pass "--audio wins over the interactive pick"
+
+# A fully-positional run never enters the menus, so the audio pick never
+# appears -- CLI callers keep zero new prompts.
+run_transcode "$TMPDIR/in.mov" mp4 720p medium
+if grep -q 'Select audio' "$calls"; then
+  fail "a positional run never shows the audio pick" "$(cat "$calls")"
+fi
+rm -f "$TMPDIR/in-720p.mp4"
+pass "a positional run never shows the audio pick"
 
 # The never-probes pin holds: a four-positional tier run never calls
 # plan_target, so no ffprobe or menu lines appear.
