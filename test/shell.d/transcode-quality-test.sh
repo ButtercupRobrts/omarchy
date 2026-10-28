@@ -1479,7 +1479,7 @@ grep '^ffmpeg ' "$calls" | grep -F -- '-b:v 427k' >/dev/null ||
   fail "--container mkv plans -b:v 427k" "$(cat "$calls")"
 rm -f "$TMPDIR/in-720p-3.7M.mkv"
 FAKE_PICK=$'Custom size…\tEnter a size like 25M' FAKE_INPUT=5M FAKE_DURATION=60 \
-  FAKE_PICK_CONTAINER=$'auto\tLet the plan decide' run_transcode "$TMPDIR/in.mov" mp4 720p
+  FAKE_PICK_CONTAINER=$'auto\tSmallest result (may be .mkv)' run_transcode "$TMPDIR/in.mov" mp4 720p
 grep -F 'auto' "$calls" | grep -F 'mp4' >/dev/null ||
   fail "the container menu offers the auto and mp4 rows" "$(cat "$calls")"
 if grep -F 'mkv' "$calls" >/dev/null; then
