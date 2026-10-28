@@ -1291,17 +1291,22 @@ grep ' -pass 2 ' "$calls" | grep -F -- '-c:v libx265 -preset slow' >/dev/null ||
 rm -f "$TMPDIR/in-720p-25M.mp4"
 pass "--codec hevc encodes with the x265/slow pair"
 
-# --codec without --target refuses: the flag belongs to the budget path.
-status=0
-run_transcode "$TMPDIR/in.mov" mp4 1080p --codec av1 || status=$?
-[[ $status -eq 1 ]] ||
-  fail "--codec without --target exits 1" "exit=$status"
-grep -F -- '--codec requires --target' "$TMPDIR/stderr" >/dev/null ||
-  fail "--codec without --target names the requirement" "$(cat "$TMPDIR/stderr")"
-if grep -q '^ffmpeg ' "$calls" || grep -q 'notification:' "$calls"; then
-  fail "--codec without --target refuses before the encode" "$(cat "$calls")"
-fi
-pass "--codec without --target refuses"
+# --codec on the tier path pins codec/preset/CRF the same way it pins the
+# plan vector: hevc at 720p encodes the x265/slow column (CRF 24), where the
+# auto split would have picked x264/fast.
+run_transcode "$TMPDIR/in.mov" mp4 720p medium --codec hevc
+grep '^ffmpeg ' "$calls" | grep -F -- '-c:v libx265 -preset slow -crf 24' >/dev/null ||
+  fail "--codec hevc on a tier run encodes x265/slow/CRF24" "$(cat "$calls")"
+rm -f "$TMPDIR/in-720p.mp4"
+run_transcode "$TMPDIR/in.mov" mp4 4k medium --codec h264
+grep '^ffmpeg ' "$calls" | grep -F -- '-c:v libx264 -preset fast -crf 23' >/dev/null ||
+  fail "--codec h264 at 4k encodes x264/fast/CRF23" "$(cat "$calls")"
+rm -f "$TMPDIR/in-4k.mp4"
+run_transcode "$TMPDIR/in.mov" mp4 720p medium --codec av1
+grep '^ffmpeg ' "$calls" | grep -F -- '-c:v libsvtav1 -preset 6 -crf 33' >/dev/null ||
+  fail "--codec av1 on a tier run encodes svtav1/6/CRF33" "$(cat "$calls")"
+rm -f "$TMPDIR/in-720p.mp4"
+pass "--codec works on the tier path with per-codec CRF columns"
 
 # An unknown codec value exits 2 in the arg loop, before any side effect.
 status=0
@@ -1381,17 +1386,51 @@ fi
 rm -f "$TMPDIR/in-720p-5.0M.mp4"
 pass "a source without audio ignores a forced audio codec"
 
-# --audio without --target refuses -- the flag belongs to the budget path.
-status=0
-run_transcode "$TMPDIR/in.mov" mp4 1080p --audio aac || status=$?
-[[ $status -eq 1 ]] ||
-  fail "--audio without --target exits 1" "exit=$status"
-grep -F -- '--audio requires --target' "$TMPDIR/stderr" >/dev/null ||
-  fail "--audio without --target names the requirement" "$(cat "$TMPDIR/stderr")"
-if grep -q '^ffmpeg ' "$calls" || grep -q 'notification:' "$calls"; then
-  fail "--audio without --target refuses before the encode" "$(cat "$calls")"
+# --audio on the tier path steers the audio encode the same way as on the
+# target path: none emits -an and drops the 192k aac pair, opus emits
+# libopus 56k AND flips the output to mkv (no faststart), aac is the
+# unchanged default.
+run_transcode "$TMPDIR/in.mov" mp4 720p medium --audio none
+grep '^ffmpeg ' "$calls" | grep -F -- '-an' >/dev/null ||
+  fail "--audio none on a tier run emits -an" "$(cat "$calls")"
+if grep '^ffmpeg ' "$calls" | grep -F -- '-c:a' >/dev/null; then
+  fail "--audio none on a tier run emits no audio encode args" "$(cat "$calls")"
 fi
-pass "--audio without --target refuses"
+rm -f "$TMPDIR/in-720p.mp4"
+run_transcode "$TMPDIR/in.mov" mp4 720p medium --audio opus
+grep -Fx "out=$TMPDIR/in-720p.mkv" "$calls" >/dev/null ||
+  fail "--audio opus on a tier run writes the .mkv name" "$(cat "$calls")"
+grep '^ffmpeg ' "$calls" | grep -F -- '-c:a libopus -b:a 56k' >/dev/null ||
+  fail "--audio opus on a tier run encodes libopus 56k" "$(cat "$calls")"
+if grep '^ffmpeg ' "$calls" | grep -F -- '-movflags' >/dev/null; then
+  fail "an mkv tier run never carries -movflags" "$(cat "$calls")"
+fi
+rm -f "$TMPDIR/in-720p.mkv"
+pass "--audio works on the tier path (none=-an, opus=mkv)"
+
+# The overrides refuse where they mean nothing: pictures die before the
+# menus, gifs die after the format is resolved -- the flags have no streams
+# to steer on either.
+status=0
+run_transcode "$TMPDIR/img.png" jpg high --audio opus || status=$?
+[[ $status -eq 1 ]] ||
+  fail "--audio on a picture exits 1" "exit=$status"
+grep -F 'apply to videos only' "$TMPDIR/stderr" >/dev/null ||
+  fail "--audio on a picture names the scope" "$(cat "$TMPDIR/stderr")"
+if [[ -s $calls ]]; then
+  fail "--audio on a picture precedes every side effect" "$(cat "$calls")"
+fi
+status=0
+run_transcode "$TMPDIR/in.mov" gif 720p --codec av1 || status=$?
+[[ $status -eq 1 ]] ||
+  fail "--codec on a gif exits 1" "exit=$status"
+grep -F -- '--codec is not supported for gif output' "$TMPDIR/stderr" >/dev/null ||
+  fail "--codec on a gif names the gif refusal" "$(cat "$TMPDIR/stderr")"
+status=0
+run_transcode "$TMPDIR/in.mov" gif 720p --audio none || status=$?
+[[ $status -eq 1 ]] ||
+  fail "--audio on a gif exits 1" "exit=$status"
+pass "--codec/--audio refuse on pictures and gif output"
 
 # Unknown and missing --audio values exit 2 in the arg loop, empty call log.
 status=0

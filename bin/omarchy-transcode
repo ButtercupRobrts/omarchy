@@ -19,8 +19,8 @@ or only from --path when provided. Then pick the output format, resolution, and 
 Options:
   --path path    Limit interactive fuzzy file selection to this path
   --target size  Target output size (e.g. 25M, 1.5G); bare number means MB
-  --codec codec  Video codec for --target: h264, hevc, or av1 (default: auto)
-  --audio codec  Audio codec for --target: aac, opus, or none (default: auto)
+  --codec codec  Video codec: h264, hevc, or av1 (default: auto)
+  --audio codec  Audio codec: aac, opus, or none (default: auto)
 
 Formats:
   Pictures: jpg, png
@@ -109,8 +109,9 @@ transcode_picture() {
 
 transcode_video() {
   local input="$1" format="$2" resolution="$3" output="$4"
-  local quality="${5:-medium}"
-  local scale crf_x264 crf_x265 gif_fps
+  local quality="${5:-medium}" codec_arg="${6:-}" audio_arg="${7:-}"
+  local scale crf_x264 crf_x265 crf_av1 gif_fps codec preset crf
+  local audio_args mux_args
 
   case "$resolution" in
   4k) scale='scale=-2:2160' ;;
@@ -124,10 +125,12 @@ transcode_video() {
     ;;
   esac
 
+  # crf_av1 runs ~+10 vs x264 for equivalent quality at roughly 40% less
+  # size -- calibrated on motion-heavy 720p content, not a lookup table.
   case "$quality" in
-  high) crf_x264=18; crf_x265=20; gif_fps=15 ;;
-  medium) crf_x264=23; crf_x265=24; gif_fps=10 ;;
-  low) crf_x264=28; crf_x265=28; gif_fps=5 ;;
+  high) crf_x264=18; crf_x265=20; crf_av1=28; gif_fps=15 ;;
+  medium) crf_x264=23; crf_x265=24; crf_av1=33; gif_fps=10 ;;
+  low) crf_x264=28; crf_x265=28; crf_av1=38; gif_fps=5 ;;
   *)
     echo "Invalid video quality: $quality (expected high, medium, or low)" >&2
     return 1
@@ -135,12 +138,31 @@ transcode_video() {
   esac
 
   case "$format" in
-  mp4)
-    if [[ $resolution == "4k" ]]; then
-      ffmpeg -i "$input" -vf "$scale" -c:v libx265 -preset slow -crf "$crf_x265" -c:a aac -b:a 192k -movflags +faststart "$output"
-    else
-      ffmpeg -i "$input" -vf "$scale" -c:v libx264 -preset fast -crf "$crf_x264" -c:a aac -b:a 192k -movflags +faststart "$output"
-    fi
+  mp4 | mkv)
+    # Codec: an explicit --codec wins; otherwise the locked 4k-keyed split.
+    case "$codec_arg" in
+    h264) codec=libx264; preset=fast; crf=$crf_x264 ;;
+    hevc) codec=libx265; preset=slow; crf=$crf_x265 ;;
+    av1) codec=libsvtav1; preset=6; crf=$crf_av1 ;;
+    *)
+      if [[ $resolution == "4k" ]]; then
+        codec=libx265; preset=slow; crf=$crf_x265
+      else
+        codec=libx264; preset=fast; crf=$crf_x264
+      fi
+      ;;
+    esac
+
+    case "${audio_arg:-aac}" in
+    aac) audio_args=(-c:a aac -b:a 192k) ;;
+    opus) audio_args=(-c:a libopus -b:a 56k) ;;
+    none) audio_args=(-an) ;;
+    esac
+    mux_args=()
+    [[ $format == "mp4" ]] && mux_args=(-movflags +faststart)
+
+    ffmpeg -i "$input" -vf "$scale" -c:v "$codec" -preset "$preset" -crf "$crf" \
+      "${audio_args[@]}" "${mux_args[@]}" "$output"
     ;;
   gif)
     ffmpeg -i "$input" -vf "fps=$gif_fps,$scale:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse" "$output"
@@ -182,29 +204,55 @@ video_audio_kbps() {
   echo 192
 }
 
-# Display token for a tier: "CRF N" for mp4 (codec keyed on resolution,
-# mirroring transcode_video's x264/x265 split), "N fps" for gif. The nine
-# CRF/fps constants deliberately duplicate transcode_video's quality case --
-# the subtext must name the effective codec's CRF, and a shared table would
-# refactor that code inside the PR #6698 conflict window.
+# Display token for a tier: "CRF N" for mp4 (an explicit --codec picks its
+# own column; otherwise keyed on resolution, mirroring transcode_video's
+# x264/x265 split), "N fps" for gif. The CRF/fps constants deliberately
+# duplicate transcode_video's quality case -- the subtext must name the
+# effective codec's CRF, and a shared table would refactor that code inside
+# the PR #6698 conflict window.
 quality_token() {
-  local format="$1" resolution="$2" quality="$3"
+  local format="$1" resolution="$2" quality="$3" codec="${4:-}"
 
   case "$format" in
   mp4)
-    if [[ $resolution == "4k" ]]; then
-      case "$quality" in
-      high) printf 'CRF 20' ;;
-      medium) printf 'CRF 24' ;;
-      low) printf 'CRF 28' ;;
-      esac
-    else
+    case "$codec" in
+    h264)
       case "$quality" in
       high) printf 'CRF 18' ;;
       medium) printf 'CRF 23' ;;
       low) printf 'CRF 28' ;;
       esac
-    fi
+      ;;
+    hevc)
+      case "$quality" in
+      high) printf 'CRF 20' ;;
+      medium) printf 'CRF 24' ;;
+      low) printf 'CRF 28' ;;
+      esac
+      ;;
+    av1)
+      case "$quality" in
+      high) printf 'CRF 28' ;;
+      medium) printf 'CRF 33' ;;
+      low) printf 'CRF 38' ;;
+      esac
+      ;;
+    *)
+      if [[ $resolution == "4k" ]]; then
+        case "$quality" in
+        high) printf 'CRF 20' ;;
+        medium) printf 'CRF 24' ;;
+        low) printf 'CRF 28' ;;
+        esac
+      else
+        case "$quality" in
+        high) printf 'CRF 18' ;;
+        medium) printf 'CRF 23' ;;
+        low) printf 'CRF 28' ;;
+        esac
+      fi
+      ;;
+    esac
     ;;
   gif)
     case "$quality" in
@@ -253,7 +301,7 @@ estimate_label() {
 # first tab and re-validated here so a foreign label dies inside the helper,
 # before the notification boundary -- never reaching output_path or ffmpeg.
 select_quality() {
-  local input="$1" format="$2" resolution="$3"
+  local input="$1" format="$2" resolution="$3" codec="${4:-}"
   local duration="" src_bytes="" audio_kbps=192 tier subtext selection custom_label="Custom size…" custom_subtext="Enter a size like 25M" bytes
   local rows=()
 
@@ -270,7 +318,7 @@ select_quality() {
     if [[ $format == "gif" ]]; then
       subtext=$(quality_token gif "$resolution" "$tier")
     elif [[ -n $duration && -n $kbps ]]; then
-      subtext="$(quality_token mp4 "$resolution" "$tier") · $(estimate_label "$duration" "$kbps" "$audio_kbps" "$src_bytes")"
+      subtext="$(quality_token mp4 "$resolution" "$tier" "$codec") · $(estimate_label "$duration" "$kbps" "$audio_kbps" "$src_bytes")"
     else
       case "$tier" in
       high) subtext="Best quality" ;;
@@ -771,13 +819,11 @@ main() {
     return 1
   fi
 
-  if [[ -n $codec_arg && -z $target_bytes ]]; then
-    echo "Invalid argument: --codec requires --target" >&2
-    return 1
-  fi
-
-  if [[ -n $audio_arg && -z $target_bytes ]]; then
-    echo "Invalid argument: --audio requires --target" >&2
+  # --codec/--audio have no meaning on pictures -- refuse early, before the
+  # menus. The gif counterpart lives in the video validation block below,
+  # after the format menu has resolved.
+  if [[ $type == "picture" && ( -n $codec_arg || -n $audio_arg ) ]]; then
+    echo "Invalid argument: --codec and --audio apply to videos only" >&2
     return 1
   fi
 
@@ -812,6 +858,16 @@ main() {
       echo "Invalid argument: --target is not supported for gif output" >&2
       return 1
     fi
+    # Same gif rule for the override flags -- a gif encode has no video codec
+    # or audio stream for them to steer.
+    if [[ $format == "gif" && -n $codec_arg ]]; then
+      echo "Invalid argument: --codec is not supported for gif output" >&2
+      return 1
+    fi
+    if [[ $format == "gif" && -n $audio_arg ]]; then
+      echo "Invalid argument: --audio is not supported for gif output" >&2
+      return 1
+    fi
     case "$resolution" in
     4k | 1080p | 720p | 540p | 480p) ;;
     *)
@@ -837,7 +893,7 @@ main() {
   fi
 
   if [[ $type == "video" && -z $quality && -z $target_bytes ]]; then
-    quality=$(select_quality "$input" "$format" "$resolution")
+    quality=$(select_quality "$input" "$format" "$resolution" "$codec_arg")
     # A Custom size… pick returns target:<bytes> -- unwrap into the same two
     # variables --target sets, so the planner block, output_path, and the
     # dispatch below are byte-identical to a CLI run (D-00f).
@@ -861,6 +917,12 @@ main() {
     # The container becomes the effective format: extension, toasts, and the
     # done label all name it for free.
     format="$container"
+  else
+    # The tier path applies the same container rule the planner enforces:
+    # opus only ships in mkv.
+    if [[ $audio_arg == "opus" ]]; then
+      format=mkv
+    fi
   fi
 
   output=$(output_path "$input" "$format" "$resolution" "${target_token:-$quality}")
@@ -889,7 +951,7 @@ main() {
         "$target_bytes" "$notify_id" "$target_desc"
     else
       omarchy-notification-send -g  "Transcoding video…" "$(basename -- "$input") to $format ($resolution)"
-      transcode_video "$input" "$format" "$resolution" "$output" "$quality"
+      transcode_video "$input" "$format" "$resolution" "$output" "$quality" "$codec_arg" "$audio_arg"
     fi
     copy_to_clipboard "$output"
     size=$(output_size_label "$output" || true)
