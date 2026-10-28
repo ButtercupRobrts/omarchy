@@ -367,7 +367,7 @@ select_container() {
   local selection
   selection=$(omarchy-menu-select "Select container" \
     auto "Smallest result (may be .mkv)" \
-    mp4 "Plays everywhere (slightly bigger)" -- --default-index 0) || return
+    mp4 "Plays everywhere (slightly bigger)" -- --width 560 --default-index 0) || return
   selection="${selection%%$'\t'*}"
   case "$selection" in
   auto | mp4) printf '%s' "$selection" ;;
