@@ -747,7 +747,7 @@ main() {
   local target_bytes="" target_token="" video_kbps="" requested_resolution=""
   local notify_id="" plan="" target_desc=""
   local a_codec="" a_kbps="" v_codec="" preset="" container="" codec_arg=""
-  local audio_arg="" interactive=""
+  local audio_arg=""
 
   while (( $# > 0 )); do
     case "$1" in
@@ -812,7 +812,6 @@ main() {
   search_path="${search_path:-$HOME/Pictures:$HOME/Videos}"
 
   if [[ -z $input ]]; then
-    interactive=1
     input=$(omarchy-menu-file "Transcode picture or video" "$search_path" "jpg jpeg png webp gif heic avif mp4 mov m4v mkv webm avi")
   fi
 
@@ -854,7 +853,6 @@ main() {
   fi
 
   if [[ -z $format ]]; then
-    interactive=1
     if [[ $type == "picture" ]]; then
       format=$(omarchy-menu-select "Select format" jpg png)
     else
@@ -863,7 +861,6 @@ main() {
   fi
 
   if [[ -z $resolution ]]; then
-    interactive=1
     if [[ $type == "picture" ]]; then
       resolution=$(omarchy-menu-select "Select resolution" high medium low)
     else
@@ -921,7 +918,6 @@ main() {
   fi
 
   if [[ $type == "video" && -z $quality && -z $target_bytes ]]; then
-    interactive=1
     quality=$(select_quality "$input" "$format" "$resolution" "$codec_arg")
     # A Custom size… pick returns target:<bytes> -- unwrap into the same two
     # variables --target sets, so the planner block, output_path, and the
@@ -932,17 +928,15 @@ main() {
         { echo "Invalid target size: $target_bytes" >&2; return 1; }
       target_token=$(numfmt --to=si "$target_bytes")
       quality=""
-    fi
-  fi
-
-  # The interactive audio pick fires only on runs that already entered the
-  # menus -- a fully-positional CLI run never sees it -- and only where the
-  # output carries audio (a menu-picked gif skips it). --audio wins when
-  # given; "auto" restores the planner's default either way.
-  if [[ $type == "video" && $format != "gif" && -z $audio_arg && -n $interactive ]]; then
-    audio_arg=$(select_audio) || return
-    if [[ $audio_arg == "auto" ]]; then
-      audio_arg=""
+      # The Custom-size pick is the one interactive moment an audio choice
+      # changes the plan: offer it there and nowhere else -- ordinary runs
+      # keep the ladder's automatic answer. --audio still wins when given.
+      if [[ -z $audio_arg ]]; then
+        audio_arg=$(select_audio) || return
+        if [[ $audio_arg == "auto" ]]; then
+          audio_arg=""
+        fi
+      fi
     fi
   fi
 
