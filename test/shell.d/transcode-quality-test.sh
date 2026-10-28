@@ -145,22 +145,22 @@ done
 cat >"$STUB_DIR/omarchy-menu-select" <<'SH'
 #!/bin/bash
 printf 'menu-select: %s\n' "$*" >>"$CALLS"
-# The audio menu is the only prompt with a safe unfaked answer: auto is the
-# script's own default, so an unset FAKE_PICK_AUDIO means "accept the
+# The container menu is the only prompt with a safe unfaked answer: auto is the
+# script's own default, so an unset FAKE_PICK_CONTAINER means "accept the
 # default" -- FAKE_PICK values for other menus are never valid audio labels
 # and must not leak into this prompt.
-if [[ $* == *"Select audio"* ]]; then
+if [[ $* == *"Select container"* ]]; then
   # ${x+x} not ${x:-auto}: set-but-empty must stay empty so an Esc fake
   # reaches the [[ -n $pick ]] guard below instead of falling back to auto.
-  if [[ -n ${FAKE_PICK_AUDIO+x} ]]; then
-    pick="$FAKE_PICK_AUDIO"
+  if [[ -n ${FAKE_PICK_CONTAINER+x} ]]; then
+    pick="$FAKE_PICK_CONTAINER"
   else
     pick="auto"
   fi
 else
   pick="${FAKE_PICK-}"
 fi
-if [[ $* != *"Select audio"* ]] && [[ -z ${FAKE_PICK+x} ]]; then
+if [[ $* != *"Select container"* ]] && [[ -z ${FAKE_PICK+x} ]]; then
   exit 1
 fi
 [[ -n $pick ]] || exit 1
@@ -1465,68 +1465,83 @@ grep -F 'Missing value for --audio' "$TMPDIR/stderr" >/dev/null ||
   fail "a missing --audio value reports on stderr" "$(cat "$TMPDIR/stderr")"
 pass "unknown or missing --audio values exit 2"
 
-# --- Select audio (Custom-size only) ---------------------------------------
+# --- Select container (Custom-size only) ---------------------------------------
 # The audio pick fires exactly once inside the Custom-size flow -- after the
 # size answer, before the planner. Ordinary tier runs and every CLI path
 # keep the ladder's automatic answer with zero new prompts.
-FAKE_PICK=$'Custom size…\tEnter a size like 25M' FAKE_INPUT=5M FAKE_DURATION=60 \
-  FAKE_PICK_AUDIO=$'opus\tSmallest (mkv)' run_transcode "$TMPDIR/in.mov" mp4 720p
-grep -E '^menu-select: Select audio' "$calls" >/dev/null ||
-  fail "a Custom-size run fires the audio pick" "$(cat "$calls")"
-grep -F 'auto' "$calls" | grep -F 'opus' | grep -F 'none' >/dev/null ||
-  fail "the audio menu offers all four rows" "$(cat "$calls")"
-grep -Fx "out=$TMPDIR/in-720p-5.0M.mkv" "$calls" >/dev/null ||
-  fail "a menu opus pick on Custom size writes the .mkv name" "$(cat "$calls")"
+FAKE_PICK=$'Custom size…\tEnter a size like 25M' FAKE_INPUT=3.7M FAKE_DURATION=60 \
+  FAKE_PICK_CONTAINER=$'mkv\tEvery codec welcome' run_transcode "$TMPDIR/in.mov" mp4 720p
+grep -E '^menu-select: Select container' "$calls" >/dev/null ||
+  fail "a Custom-size run fires the container pick" "$(cat "$calls")"
+grep -F 'auto' "$calls" | grep -F 'mp4' | grep -F 'mkv' >/dev/null ||
+  fail "the container menu offers all three rows" "$(cat "$calls")"
+grep -Fx "out=$TMPDIR/in-720p-3.7M.mkv" "$calls" >/dev/null ||
+  fail "a menu mkv pick writes the .mkv name" "$(cat "$calls")"
 grep '^ffmpeg ' "$calls" | grep -F -- '-c:a libopus -b:a 56k' >/dev/null ||
-  fail "a menu opus pick encodes libopus" "$(cat "$calls")"
-grep '^ffmpeg ' "$calls" | grep -F -- '-b:v 597k' >/dev/null ||
-  fail "a menu opus pick plans -b:v 597k" "$(cat "$calls")"
-rm -f "$TMPDIR/in-720p-5.0M.mkv"
-pass "the Custom-size audio pick steers the plan"
+  fail "a menu mkv pick keeps the opus ladder" "$(cat "$calls")"
+grep '^ffmpeg ' "$calls" | grep -F -- '-b:v 427k' >/dev/null ||
+  fail "a menu mkv pick plans -b:v 427k" "$(cat "$calls")"
+rm -f "$TMPDIR/in-720p-3.7M.mkv"
+pass "the Custom-size container pick steers the plan"
 
-# An unfaked audio menu defaults to auto -- the planner's own answer, so the
+# An unfaked container menu defaults to auto -- the planner's own answer, so the
 # Custom run matches a plain --target run bit for bit (aac 128k, mp4).
 FAKE_PICK=$'Custom size…\tEnter a size like 25M' FAKE_INPUT=5M FAKE_DURATION=60 \
   run_transcode "$TMPDIR/in.mov" mp4 720p
-grep -E '^menu-select: Select audio' "$calls" >/dev/null ||
+grep -E '^menu-select: Select container' "$calls" >/dev/null ||
   fail "a Custom-size run still fires the pick" "$(cat "$calls")"
 grep '^ffmpeg ' "$calls" | grep -F -- '-c:a aac -b:a 128k' >/dev/null ||
   fail "an auto audio pick keeps the ladder's aac 128k" "$(cat "$calls")"
 rm -f "$TMPDIR/in-720p-5.0M.mp4"
-pass "the audio menu's auto pick is the planner default"
+pass "the container menu's auto pick is the planner default"
 
-# A tier-picked run never sees the audio pick -- audio is automatic on
+# A tier-picked run never sees the container pick -- audio is automatic on
 # every path except Custom size.
 FAKE_PICK=$'medium\tCRF 23 · ~24 MB' run_transcode "$TMPDIR/in.mov" mp4 720p
-if grep -q 'Select audio' "$calls"; then
-  fail "a quality-tier menu run never shows the audio pick" "$(cat "$calls")"
+if grep -q 'Select container' "$calls"; then
+  fail "a quality-tier menu run never shows the container pick" "$(cat "$calls")"
 fi
 rm -f "$TMPDIR/in-720p.mp4"
 pass "a quality-tier menu run keeps audio automatic"
 
-# Esc at the audio menu cancels before the notification, same as every
+# Esc at the container menu cancels before the notification, same as every
 # other prompt.
 status=0
 FAKE_PICK=$'Custom size…\tEnter a size like 25M' FAKE_INPUT=5M FAKE_DURATION=60 \
-  FAKE_PICK_AUDIO='' run_transcode "$TMPDIR/in.mov" mp4 720p || status=$?
+  FAKE_PICK_CONTAINER='' run_transcode "$TMPDIR/in.mov" mp4 720p || status=$?
 [[ $status -ne 0 ]] ||
-  fail "Esc at the audio menu cancels"
+  fail "Esc at the container menu cancels"
 if grep -q 'notification:' "$calls" || grep -q '^ffmpeg ' "$calls"; then
-  fail "Esc at the audio menu cancels before the notification" "$(cat "$calls")"
+  fail "Esc at the container menu cancels before the notification" "$(cat "$calls")"
 fi
-pass "Esc at the audio menu cancels before the notification"
+pass "Esc at the container menu cancels before the notification"
 
 # --audio pins it before the menu can fire: a Custom-size run with the
-# flag never shows Select audio.
+# flag never shows Select container.
 FAKE_PICK=$'Custom size…\tEnter a size like 25M' FAKE_INPUT=5M FAKE_DURATION=60 \
-  run_transcode "$TMPDIR/in.mov" mp4 720p --audio none
-if grep -q 'Select audio' "$calls"; then
-  fail "--audio suppresses the Custom-size pick" "$(cat "$calls")"
+  run_transcode "$TMPDIR/in.mov" mp4 720p --container mkv
+if grep -q 'Select container' "$calls"; then
+  fail "--container suppresses the Custom-size pick" "$(cat "$calls")"
 fi
-grep '^ffmpeg ' "$calls" | grep -F -- '-an' >/dev/null ||
-  fail "--audio none still encodes silent" "$(cat "$calls")"
-rm -f "$TMPDIR/in-720p-5.0M.mp4"
-pass "--audio wins over the Custom-size pick"
+grep -Fx "out=$TMPDIR/in-720p-5.0M.mkv" "$calls" >/dev/null ||
+  fail "--container mkv writes the .mkv name" "$(cat "$calls")"
+rm -f "$TMPDIR/in-720p-5.0M.mkv"
+pass "--container wins over the Custom-size pick"
+
+# mp4+opus is the one pairing we refuse -- and unknown/missing container
+# values exit 2 in the arg loop with an empty call log.
+status=0
+run_transcode "$TMPDIR/in.mov" mp4 720p --target 5M --container mp4 --audio opus || status=$?
+[[ $status -eq 1 ]] || fail "--container mp4 with --audio opus exits 1" "exit=$status"
+grep -F 'cannot be combined with --audio opus' "$TMPDIR/stderr" >/dev/null ||
+  fail "the mp4+opus refusal names the conflict" "$(cat "$TMPDIR/stderr")"
+status=0
+run_transcode "$TMPDIR/in.mov" mp4 720p --target 5M --container webm || status=$?
+[[ $status -eq 2 ]] || fail "an unknown --container exits 2" "exit=$status"
+if [[ -s $calls ]]; then
+  fail "an unknown --container precedes every side effect" "$(cat "$calls")"
+fi
+pass "--container mp4+opus refuses; bad values exit 2"
 
 # The never-probes pin holds: a four-positional tier run never calls
 # plan_target, so no ffprobe or menu lines appear.

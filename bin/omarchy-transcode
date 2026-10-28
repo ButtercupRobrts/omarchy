@@ -3,7 +3,7 @@
 # omarchy:group=transcode
 # omarchy:name=
 # omarchy:summary=Transcode pictures and videos for sharing
-# omarchy:args=[--path path] [--target size] [--codec codec] [--audio codec] [input] [format] [resolution] [quality]
+# omarchy:args=[--path path] [--target size] [--codec codec] [--audio codec] [--container fmt] [input] [format] [resolution] [quality]
 # omarchy:examples=omarchy transcode|omarchy transcode --path ~/Downloads|omarchy transcode ~/Videos/demo.mov mp4 1080p|omarchy transcode ~/Pictures/background.heic jpg medium|omarchy transcode ~/Videos/demo.mov mp4 1080p low|omarchy transcode ~/Videos/demo.mov mp4 1080p --target 25M|omarchy transcode ~/Videos/demo.mov mp4 1080p --target 10M --codec av1|omarchy transcode ~/Videos/demo.mov mp4 720p --target 10M --audio aac
 
 set -euo pipefail
@@ -21,6 +21,7 @@ Options:
   --target size  Target output size (e.g. 25M, 1.5G); bare number means MB
   --codec codec  Video codec: h264, hevc, or av1 (default: auto)
   --audio codec  Audio codec: aac, opus, or none (default: auto)
+  --container f  Output container: mp4 or mkv (default: auto)
 
 Formats:
   Pictures: jpg, png
@@ -354,25 +355,23 @@ select_quality() {
   printf '%s' "$selection"
 }
 
-# The interactive audio pick, shown only on runs that already entered the
-# menus and only for containers that carry audio: "auto" defers to the
-# ladder (aac at generous budgets, opus under starvation, silent when there
-# is no stream), the rest pin a codec outright -- opus keeps its mkv
-# container rule, none emits -an. auto is pre-highlighted so Enter keeps the
-# default, and Esc cancels like every other prompt. The label is stripped
-# and re-validated here the same way select_quality's is.
-select_audio() {
+# The interactive container pick, shown only inside the Custom-size flow:
+# "auto" lets the planner pick by the audio it chose (mp4 for aac, mkv for
+# opus), mp4 forces an aac-compatible output for players that reject the
+# exotic combinations, mkv keeps every codec pairing on the table. auto is
+# pre-highlighted so Enter keeps the default; Esc cancels like every other
+# prompt; the label is stripped and re-validated like select_quality's.
+select_container() {
   local selection
-  selection=$(omarchy-menu-select "Select audio" \
-    auto "Let the budget decide" \
-    aac "Best player support" \
-    opus "Smallest (mkv)" \
-    none "No audio" -- --default-index 0) || return
+  selection=$(omarchy-menu-select "Select container" \
+    auto "Let the plan decide" \
+    mp4 "Best player support" \
+    mkv "Every codec welcome" -- --default-index 0) || return
   selection="${selection%%$'\t'*}"
   case "$selection" in
-  auto | aac | opus | none) printf '%s' "$selection" ;;
+  auto | mp4 | mkv) printf '%s' "$selection" ;;
   *)
-    echo "Invalid audio choice: $selection (expected auto, aac, opus, or none)" >&2
+    echo "Invalid container choice: $selection (expected auto, mp4, or mkv)" >&2
     return 1
     ;;
   esac
@@ -476,12 +475,14 @@ video_height() {
 # Prints "<codec> <kbps>" for the plan vector; "none" is a codec the encode
 # arm maps to no audio args.
 choose_audio() {
-  local budget="$1" has_audio="${2:-1}" prefer="${3:-}"
+  local budget="$1" has_audio="${2:-1}" prefer="${3:-}" container="${4:-}"
   if (( has_audio == 0 )) || [[ $prefer == "none" ]]; then
     printf 'none 0\n'
   elif [[ $prefer == "opus" ]]; then
     printf 'libopus 56\n'
-  elif [[ $prefer == "aac" ]]; then
+  elif [[ $prefer == "aac" || $container == "mp4" ]]; then
+    # Forced aac, or a forced mp4 container -- which cannot take opus --
+    # both land on the aac ladder.
     if (( budget >= 768 )); then
       printf 'aac 192\n'
     else
@@ -513,7 +514,7 @@ choose_audio() {
 # audio-alone-exceeds-budget refusal, so no negative, zero, or -nan -b:v ever
 # reaches ffmpeg argv.
 plan_target() {
-  local input="$1" target_bytes="$2" res="$3" codec_arg="${4:-}" audio_arg="${5:-}"
+  local input="$1" target_bytes="$2" res="$3" codec_arg="${4:-}" audio_arg="${5:-}" container_arg="${6:-}"
   local src_bytes duration audio_kbps video_kbps floor min_label
   local net_kbps a_codec a_kbps v_codec preset container
   local src_height rung rw rh fps
@@ -540,13 +541,14 @@ plan_target() {
   }') ||
     { echo "Cannot determine duration for $input; cannot size to a target" >&2; return 1; }
 
-  read -r a_codec a_kbps <<<"$(choose_audio "$net_kbps" "$audio_kbps" "$audio_arg")"
+  read -r a_codec a_kbps <<<"$(choose_audio "$net_kbps" "$audio_kbps" "$audio_arg" "$container_arg")"
   video_kbps=$(( net_kbps - a_kbps ))
 
-  # Opus only ships in mkv -- mp4+opus muxes but enough players choke on the
-  # audio track that it is not worth the toast explaining a silent file.
-  container=mp4
-  if [[ $a_codec == "libopus" ]]; then
+  # Container: an explicit pick wins; otherwise opus forces mkv (mp4+opus
+  # muxes but enough players choke on the audio track that it is not worth
+  # the toast explaining a silent file) and everything else is mp4.
+  container=${container_arg:-mp4}
+  if [[ -z $container_arg && $a_codec == "libopus" ]]; then
     container=mkv
   fi
 
@@ -747,7 +749,7 @@ main() {
   local target_bytes="" target_token="" video_kbps="" requested_resolution=""
   local notify_id="" plan="" target_desc=""
   local a_codec="" a_kbps="" v_codec="" preset="" container="" codec_arg=""
-  local audio_arg=""
+  local audio_arg="" container_arg=""
 
   while (( $# > 0 )); do
     case "$1" in
@@ -780,6 +782,17 @@ main() {
       aac | opus | none) audio_arg="$1" ;;
       *)
         echo "Invalid --audio: $1 (expected aac, opus, or none)" >&2
+        return 2
+        ;;
+      esac
+      ;;
+    --container)
+      shift
+      (( $# > 0 )) || { echo "Missing value for --container" >&2; return 2; }
+      case "$1" in
+      mp4 | mkv) container_arg="$1" ;;
+      *)
+        echo "Invalid --container: $1 (expected mp4 or mkv)" >&2
         return 2
         ;;
       esac
@@ -847,8 +860,15 @@ main() {
   # --codec/--audio have no meaning on pictures -- refuse early, before the
   # menus. The gif counterpart lives in the video validation block below,
   # after the format menu has resolved.
-  if [[ $type == "picture" && ( -n $codec_arg || -n $audio_arg ) ]]; then
-    echo "Invalid argument: --codec and --audio apply to videos only" >&2
+  if [[ $type == "picture" && ( -n $codec_arg || -n $audio_arg || -n $container_arg ) ]]; then
+    echo "Invalid argument: --codec, --audio, and --container apply to videos only" >&2
+    return 1
+  fi
+
+  # mp4+opus is the one pairing we refuse to ship -- too many players accept
+  # the container and then silence the audio track.
+  if [[ $audio_arg == "opus" && $container_arg == "mp4" ]]; then
+    echo "Invalid argument: --container mp4 cannot be combined with --audio opus" >&2
     return 1
   fi
 
@@ -893,6 +913,10 @@ main() {
       echo "Invalid argument: --audio is not supported for gif output" >&2
       return 1
     fi
+    if [[ $format == "gif" && -n $container_arg ]]; then
+      echo "Invalid argument: --container is not supported for gif output" >&2
+      return 1
+    fi
     case "$resolution" in
     4k | 1080p | 720p | 540p | 480p) ;;
     *)
@@ -928,13 +952,14 @@ main() {
         { echo "Invalid target size: $target_bytes" >&2; return 1; }
       target_token=$(numfmt --to=si "$target_bytes")
       quality=""
-      # The Custom-size pick is the one interactive moment an audio choice
-      # changes the plan: offer it there and nowhere else -- ordinary runs
-      # keep the ladder's automatic answer. --audio still wins when given.
-      if [[ -z $audio_arg ]]; then
-        audio_arg=$(select_audio) || return
-        if [[ $audio_arg == "auto" ]]; then
-          audio_arg=""
+      # The Custom-size pick is the one interactive moment a container
+      # choice changes the plan: offer it there and nowhere else -- the
+      # audio ladder itself stays automatic. --container and --audio opus
+      # both make the pick redundant (opus already implies mkv).
+      if [[ -z $container_arg && $audio_arg != "opus" ]]; then
+        container_arg=$(select_container) || return
+        if [[ $container_arg == "auto" ]]; then
+          container_arg=""
         fi
       fi
     fi
@@ -946,15 +971,17 @@ main() {
   # makes the filename and both toasts name it for free.
   if [[ -n $target_bytes ]]; then
     requested_resolution="$resolution"
-    plan=$(plan_target "$input" "$target_bytes" "$requested_resolution" "$codec_arg" "$audio_arg")
+    plan=$(plan_target "$input" "$target_bytes" "$requested_resolution" "$codec_arg" "$audio_arg" "$container_arg")
     read -r resolution video_kbps a_codec a_kbps v_codec preset container <<<"$plan"
     # The container becomes the effective format: extension, toasts, and the
     # done label all name it for free.
     format="$container"
   else
     # The tier path applies the same container rule the planner enforces:
-    # opus only ships in mkv.
-    if [[ $audio_arg == "opus" ]]; then
+    # an explicit pick wins, opus otherwise ships mkv.
+    if [[ -n $container_arg ]]; then
+      format="$container_arg"
+    elif [[ $audio_arg == "opus" ]]; then
       format=mkv
     fi
   fi
