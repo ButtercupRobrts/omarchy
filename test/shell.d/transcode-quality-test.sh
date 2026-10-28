@@ -1324,6 +1324,93 @@ grep -F 'Missing value for --codec' "$TMPDIR/stderr" >/dev/null ||
   fail "a missing --codec value reports on stderr" "$(cat "$TMPDIR/stderr")"
 pass "a missing --codec value exits 2"
 
+# --- --audio override -----------------------------------------------------
+# --audio aac pins aac where the ladder would have picked opus: 3.9M/60s
+# nets 509k -> aac 128k (under 768k) -> 381k video, and the container flips
+# back to mp4 with faststart. The rung step still applies: 381k is under
+# 720p's floor, so it lands on 540p.
+FAKE_DURATION=60 run_transcode "$TMPDIR/in.mov" mp4 4k --target 3.9M --audio aac
+grep -Fx "out=$TMPDIR/in-540p-3.9M.mp4" "$calls" >/dev/null ||
+  fail "--audio aac keeps the mp4 container" "$(cat "$calls")"
+grep '^ffmpeg ' "$calls" | grep -F -- '-c:a aac -b:a 128k' >/dev/null ||
+  fail "--audio aac tiers to aac 128k at this budget" "$(cat "$calls")"
+grep '^ffmpeg ' "$calls" | grep -F -- '-b:v 381k' >/dev/null ||
+  fail "--audio aac leaves -b:v 381k for video" "$(cat "$calls")"
+grep '^ffmpeg ' "$calls" | grep -F -- '-movflags +faststart' >/dev/null ||
+  fail "an mp4 run keeps faststart" "$(cat "$calls")"
+rm -f "$TMPDIR/in-540p-3.9M.mp4"
+pass "--audio aac overrides the opus tier and keeps mp4"
+
+# --audio opus forces opus+mkv even at a fat budget: 25M/60s nets 3266k ->
+# opus 56k -> 3210k video at 1080p. The audio probe still runs -- the ladder
+# must know a stream exists to encode it.
+FAKE_DURATION=60 run_transcode "$TMPDIR/in.mov" mp4 1080p --target 25M --audio opus
+grep -Fx "out=$TMPDIR/in-1080p-25M.mkv" "$calls" >/dev/null ||
+  fail "--audio opus forces the mkv container" "$(cat "$calls")"
+grep '^ffmpeg ' "$calls" | grep -F -- '-c:a libopus -b:a 56k' >/dev/null ||
+  fail "--audio opus encodes libopus 56k" "$(cat "$calls")"
+if grep '^ffmpeg ' "$calls" | grep -F -- '-movflags' >/dev/null; then
+  fail "an mkv run never carries -movflags" "$(cat "$calls")"
+fi
+rm -f "$TMPDIR/in-1080p-25M.mkv"
+pass "--audio opus forces opus 56k and mkv at any budget"
+
+# --audio none drops audio even when the source has a stream: the -an flag
+# must be explicit -- without it ffmpeg's default stream selection would
+# mux the source audio into a "no audio" output. 5M/60s nets 653k, all of
+# it going to video.
+FAKE_DURATION=60 run_transcode "$TMPDIR/in.mov" mp4 4k --target 5M --audio none
+grep '^ffmpeg ' "$calls" | grep -F -- '-an' >/dev/null ||
+  fail "--audio none passes -an explicitly" "$(cat "$calls")"
+if grep '^ffmpeg ' "$calls" | grep -F -- '-c:a' >/dev/null; then
+  fail "--audio none emits no audio encode args" "$(cat "$calls")"
+fi
+grep '^ffmpeg ' "$calls" | grep -F -- '-b:v 653k' >/dev/null ||
+  fail "--audio none frees the whole budget" "$(cat "$calls")"
+rm -f "$TMPDIR/in-720p-5.0M.mp4"
+pass "--audio none strips audio with an explicit -an"
+
+# A forced audio codec still cannot invent a stream: a source with no audio
+# under --audio aac emits -an, not aac -- the probe wins over the flag.
+FAKE_AUDIO=no FAKE_DURATION=60 run_transcode "$TMPDIR/in.mov" mp4 4k --target 5M --audio aac
+grep '^ffmpeg ' "$calls" | grep -F -- '-an' >/dev/null ||
+  fail "a no-stream source gets -an even under --audio aac" "$(cat "$calls")"
+if grep '^ffmpeg ' "$calls" | grep -F -- '-c:a' >/dev/null; then
+  fail "a no-stream source never gets audio args" "$(cat "$calls")"
+fi
+rm -f "$TMPDIR/in-720p-5.0M.mp4"
+pass "a source without audio ignores a forced audio codec"
+
+# --audio without --target refuses -- the flag belongs to the budget path.
+status=0
+run_transcode "$TMPDIR/in.mov" mp4 1080p --audio aac || status=$?
+[[ $status -eq 1 ]] ||
+  fail "--audio without --target exits 1" "exit=$status"
+grep -F -- '--audio requires --target' "$TMPDIR/stderr" >/dev/null ||
+  fail "--audio without --target names the requirement" "$(cat "$TMPDIR/stderr")"
+if grep -q '^ffmpeg ' "$calls" || grep -q 'notification:' "$calls"; then
+  fail "--audio without --target refuses before the encode" "$(cat "$calls")"
+fi
+pass "--audio without --target refuses"
+
+# Unknown and missing --audio values exit 2 in the arg loop, empty call log.
+status=0
+run_transcode "$TMPDIR/in.mov" mp4 1080p --target 25M --audio mp3 || status=$?
+[[ $status -eq 2 ]] ||
+  fail "an unknown --audio value exits 2" "exit=$status"
+grep -F 'Invalid --audio: mp3' "$TMPDIR/stderr" >/dev/null ||
+  fail "an unknown --audio names the accepted values" "$(cat "$TMPDIR/stderr")"
+if [[ -s $calls ]]; then
+  fail "an unknown --audio precedes every side effect" "$(cat "$calls")"
+fi
+status=0
+run_transcode "$TMPDIR/in.mov" mp4 1080p --target 25M --audio || status=$?
+[[ $status -eq 2 ]] ||
+  fail "a missing --audio value exits 2" "exit=$status"
+grep -F 'Missing value for --audio' "$TMPDIR/stderr" >/dev/null ||
+  fail "a missing --audio value reports on stderr" "$(cat "$TMPDIR/stderr")"
+pass "unknown or missing --audio values exit 2"
+
 # The never-probes pin holds: a four-positional tier run never calls
 # plan_target, so no ffprobe or menu lines appear.
 run_transcode "$TMPDIR/in.mov" mp4 1080p medium
