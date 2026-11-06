@@ -334,7 +334,7 @@ select_quality() {
   # "label\tsubtext", and the strip below hands the label back verbatim.
   [[ $format == "mp4" ]] && rows+=($'\t'"$custom_label"$'\t'"$custom_subtext")
 
-  selection=$(omarchy-menu-select "Select quality" "${rows[@]}" -- --default-index 1) || return
+  selection=$(omarchy-menu-select "$(omarchy-i18n transcode.selectQuality)" "${rows[@]}" -- --default-index 1) || return
 
   selection="${selection%%$'\t'*}"
 
@@ -365,7 +365,7 @@ select_quality() {
 # re-validated like select_quality's.
 select_container() {
   local selection
-  selection=$(omarchy-menu-select "Select container" \
+  selection=$(omarchy-menu-select "$(omarchy-i18n transcode.selectContainer)" \
     auto "Smallest result (may be .mkv)" \
     mp4 "Plays everywhere (slightly bigger)" -- --width 560 --default-index 0) || return
   selection="${selection%%$'\t'*}"
@@ -706,7 +706,7 @@ transcode_video_target() {
     # skip deliberate -- a failing [[ ]] && cmd statement would be silently
     # inert too, but if names the intent.
     if [[ $notify_id =~ ^[0-9]+$ ]]; then
-      omarchy-notification-send -r "$notify_id" -g  "Transcoding video…" \
+      omarchy-notification-send -r "$notify_id" -g  "$(omarchy-i18n transcode.working)" \
         "${desc:-$(basename -- "$input") to $container ($resolution}, pass 2/2)" || true
     fi
 
@@ -826,7 +826,7 @@ main() {
   search_path="${search_path:-$HOME/Pictures:$HOME/Videos}"
 
   if [[ -z $input ]]; then
-    input=$(omarchy-menu-file "Transcode picture or video" "$search_path" "jpg jpeg png webp gif heic avif mp4 mov m4v mkv webm avi")
+    input=$(omarchy-menu-file "$(omarchy-i18n transcode.pickInput)" "$search_path" "jpg jpeg png webp gif heic avif mp4 mov m4v mkv webm avi")
   fi
 
   [[ -n $input ]] || return 1
@@ -875,17 +875,29 @@ main() {
 
   if [[ -z $format ]]; then
     if [[ $type == "picture" ]]; then
-      format=$(omarchy-menu-select "Select format" jpg png)
+      format=$(omarchy-menu-select "$(omarchy-i18n transcode.selectFormat)" jpg png)
     else
-      format=$(omarchy-menu-select "Select format" mp4 gif)
+      format=$(omarchy-menu-select "$(omarchy-i18n transcode.selectFormat)" mp4 gif)
     fi
   fi
 
+  # Picture qualities are words, so the menu shows them in the Omarchy language
+  # and maps the pick back to the value the transcoder takes.
+  local high medium low choice
+  high=$(omarchy-i18n transcode.qualityHigh)
+  medium=$(omarchy-i18n transcode.qualityMedium)
+  low=$(omarchy-i18n transcode.qualityLow)
+
   if [[ -z $resolution ]]; then
     if [[ $type == "picture" ]]; then
-      resolution=$(omarchy-menu-select "Select resolution" high medium low)
+      choice=$(omarchy-menu-select "$(omarchy-i18n transcode.selectResolution)" "$high" "$medium" "$low")
+      case $choice in
+        "$high") resolution=high ;;
+        "$medium") resolution=medium ;;
+        "$low") resolution=low ;;
+      esac
     else
-      resolution=$(omarchy-menu-select "Select resolution" 4k 1080p 720p 540p 480p)
+      resolution=$(omarchy-menu-select "$(omarchy-i18n transcode.selectResolution)" 4k 1080p 720p 540p 480p)
     fi
   fi
 
@@ -989,12 +1001,19 @@ main() {
 
   output=$(output_path "$input" "$format" "$resolution" "${target_token:-$quality}")
 
+  local resolution_label=$resolution
+  case $resolution in
+    high) resolution_label=$high ;;
+    medium) resolution_label=$medium ;;
+    low) resolution_label=$low ;;
+  esac
+
   if [[ $type == "video" ]]; then
     if [[ -n $target_bytes ]]; then
       # The start toast carries the effective resolution, the step-down
       # disclosure, and the target; -p captures the daemon id so the pass-2
       # update inside transcode_video_target can replace it in place.
-      target_desc="$(basename -- "$input") to $format ($resolution"
+      target_desc="$(omarchy-i18n transcode.workingBody "$(basename -- "$input")" "$format" "$resolution")"
       if [[ $requested_resolution != "$resolution" ]]; then
         target_desc+=" — stepped down from $requested_resolution"
       fi
@@ -1007,22 +1026,26 @@ main() {
       else
         pass_label=", pass 1/2"
       fi
-      notify_id=$(omarchy-notification-send -p -g  "Transcoding video…" "$target_desc$pass_label)")
+      notify_id=$(omarchy-notification-send -p -g  "$(omarchy-i18n transcode.working)" "$target_desc$pass_label)")
       transcode_video_target "$input" "$resolution" "$output" "$video_kbps" \
         "$a_codec" "$a_kbps" "$v_codec" "$preset" "$container" \
         "$target_bytes" "$notify_id" "$target_desc"
     else
-      omarchy-notification-send -g  "Transcoding video…" "$(basename -- "$input") to $format ($resolution)"
+      omarchy-notification-send -g  "$(omarchy-i18n transcode.working)" "$(omarchy-i18n transcode.workingBody "$(basename -- "$input")" "$format" "$resolution")"
       transcode_video "$input" "$format" "$resolution" "$output" "$quality" "$codec_arg" "$audio_arg"
     fi
     copy_to_clipboard "$output"
     size=$(output_size_label "$output" || true)
-    omarchy-notification-send -g  "Transcoded to $resolution $format" "Saved and copied to clipboard${size:+ ($size)}."
+    saved_msg="$(omarchy-i18n transcode.saved)"
+    [[ -n $size ]] && saved_msg="${saved_msg%.} ($size)."
+    omarchy-notification-send -g  "$(omarchy-i18n transcode.done "$resolution" "$format")" "$saved_msg"
   else
     transcode_picture "$input" "$format" "$resolution" "$output"
     copy_to_clipboard "$output"
     size=$(output_size_label "$output" || true)
-    omarchy-notification-send -g  "Transcoded to $resolution $format" "Saved and copied to clipboard${size:+ ($size)}."
+    saved_msg="$(omarchy-i18n transcode.saved)"
+    [[ -n $size ]] && saved_msg="${saved_msg%.} ($size)."
+    omarchy-notification-send -g  "$(omarchy-i18n transcode.done "$resolution_label" "$format")" "$saved_msg"
   fi
 }
 

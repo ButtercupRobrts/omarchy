@@ -56,7 +56,7 @@ Item {
   }
 
   function show(iconName, rawMessage, rawValue, rawMax, rawProgressText, rawDuration) {
-    var next = OsdModel.stateForShow(iconName, rawMessage, rawValue, rawMax, rawProgressText, rawDuration)
+    var next = OsdModel.stateForShow(iconName, rawMessage, rawValue, rawMax, rawProgressText, rawDuration, Commons.I18n.formatNumber)
     // Update before opening so a fresh OSD starts at its new value; only
     // subsequent updates while it remains open animate the progress bar.
     iconKey = next.iconKey
@@ -97,7 +97,7 @@ Item {
   TextMetrics {
     id: valueMetrics
     font: messageMetrics.font
-    text: "100%"
+    text: Commons.I18n.formatNumber(100) + "%"
   }
 
   TextMetrics {
@@ -113,7 +113,7 @@ Item {
     text: OsdModel.widestIcon
   }
 
-  IpcHandler {
+  ShellIpc {
     target: "osd"
     function show(payloadJson: string): string {
       root.open(payloadJson)
@@ -124,15 +124,11 @@ Item {
     function ping(): string { return "ok" }
   }
 
-  PanelWindow {
+  OverlayWindow {
     id: panel
-    visible: root.opened
-    anchors { top: true; bottom: true; left: true; right: true }
-    color: "transparent"
+    shown: root.opened
+    shownKeyboardFocus: WlrKeyboardFocus.None
     WlrLayershell.namespace: "omarchy-osd"
-    WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
-    exclusionMode: ExclusionMode.Ignore
     // Visual-only surface: keep the layer-shell input region empty so the OSD
     // never blocks clicks to the desktop below it.
     mask: Region {}
@@ -177,13 +173,15 @@ Item {
           anchors.verticalCenter: parent.verticalCenter
           color: Util.alpha(Commons.Color.popups.text, 0.45)
           Rectangle {
+            // Anchored so a right-to-left layout fills from the right.
+            anchors.left: parent.left
             height: parent.height
             width: parent.width * (root.hasProgress ? root.value / root.maxValue : 0)
             color: Commons.Color.accent
 
             Behavior on width {
               enabled: root.opened
-              NumberAnimation { duration: 140; easing.type: Easing.OutCubic }
+              NumberAnimation { duration: Style.duration(140); easing.type: Easing.OutCubic }
             }
           }
         }

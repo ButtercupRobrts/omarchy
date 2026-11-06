@@ -29,7 +29,7 @@ Item {
   property int headerHeight: Math.max(Style.space(34), Style.font.title + Style.spacing.controlPaddingY * 2)
   property int cardWidth: Math.min(Style.space(300), panel.width - Style.gapsOut * 2)
   property int cardHeight: Math.min(contentMargin * 2 + headerHeight, panel.height - Style.gapsOut * 2)
-  readonly property string promptText: root.step === "message" ? "Reminder message" : "Remind in minutes"
+  readonly property string promptText: root.step === "message" ? I18n.t("reminders.messagePrompt") : I18n.t("reminders.minutesPrompt")
 
   function open(payloadJson) {
     var payload = ({})
@@ -75,7 +75,7 @@ Item {
       }
 
       if (!nextMinutes) {
-        Quickshell.execDetached([root.omarchyPath + "/bin/omarchy-notification-send", "Invalid reminder", "Enter the number of minutes"])
+        Quickshell.execDetached([root.omarchyPath + "/bin/omarchy-notification-send", I18n.t("reminders.invalidTitle"), I18n.t("reminders.invalidBody")])
         return
       }
 
@@ -93,15 +93,10 @@ Item {
     }
   }
 
-  PanelWindow {
+  OverlayWindow {
     id: panel
-    visible: root.opened
-    anchors { top: true; bottom: true; left: true; right: true }
-    color: "transparent"
+    shown: root.opened
     WlrLayershell.namespace: "omarchy-reminders"
-    WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
-    exclusionMode: ExclusionMode.Ignore
 
     Rectangle {
       anchors.fill: parent
@@ -161,7 +156,7 @@ Item {
           anchors.left: parent.left
           anchors.right: parent.right
           anchors.verticalCenter: parent.verticalCenter
-          text: root.filterText || (root.promptText + "...")
+          text: root.filterText || root.promptText
           color: root.foreground
           opacity: root.filterText ? 1 : 0.58
           font.family: root.fontFamily

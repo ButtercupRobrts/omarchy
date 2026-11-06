@@ -15,6 +15,10 @@ import qs.Ui
 // track the live readings. Callers name the dials, the unit, and the scale.
 PanelWindow {
   id: root
+  // Right-to-left languages read this window mirrored.
+  Binding { target: root.contentItem; property: "LayoutMirroring.enabled"; value: Commons.I18n.rightToLeft }
+  Binding { target: root.contentItem; property: "LayoutMirroring.childrenInherit"; value: true }
+
 
   required property string fontFamily
   required property bool running
@@ -23,7 +27,7 @@ PanelWindow {
   property string unit: "Mbps"
   property string title: ""
   property string layerNamespace: "omarchy-speed-test"
-  property string runAgainTooltip: "Measure again"
+  property string runAgainTooltip: Commons.I18n.t("speedtest.measureAgain")
   property real leftValue: 0
   property real rightValue: 0
   property bool leftLive: false
@@ -62,7 +66,7 @@ PanelWindow {
   onRightValueChanged: expandScale(rightValue)
 
   Behavior on fullScale {
-    NumberAnimation { duration: 400; easing.type: Easing.OutCubic }
+    NumberAnimation { duration: Style.duration(400); easing.type: Easing.OutCubic }
   }
 
   // The scrim below is a fixed near-black regardless of theme, so text and
@@ -165,7 +169,7 @@ PanelWindow {
         // Centered on the dial pair. Fades rather than unmounts while a run
         // is in flight, so the cluster never shifts.
         Button {
-          text: "Run Again"
+          text: Commons.I18n.t("speedtest.runAgain")
           tooltipText: root.runAgainTooltip
           bordered: true
           enabled: !root.running
@@ -179,7 +183,7 @@ PanelWindow {
           onClicked: root.runAgainRequested()
 
           Behavior on opacity {
-            NumberAnimation { duration: 240; easing.type: Easing.OutCubic }
+            NumberAnimation { duration: Style.duration(240); easing.type: Easing.OutCubic }
           }
         }
 
@@ -237,13 +241,13 @@ PanelWindow {
     opacity: engaged ? 1 : 0.5
 
     Behavior on opacity {
-      NumberAnimation { duration: 240; easing.type: Easing.OutCubic }
+      NumberAnimation { duration: Style.duration(240); easing.type: Easing.OutCubic }
     }
 
     // Live readings land once a second; glide between them rather than snap.
     Behavior on shown {
       enabled: !ignition.running
-      NumberAnimation { duration: 600; easing.type: Easing.OutCubic }
+      NumberAnimation { duration: Style.duration(600); easing.type: Easing.OutCubic }
     }
 
     onValueChanged: {
@@ -258,8 +262,8 @@ PanelWindow {
     // the live figures take over.
     SequentialAnimation {
       id: ignition
-      NumberAnimation { target: dial; property: "shown"; to: dial.fullScale; duration: 550; easing.type: Easing.InOutCubic }
-      NumberAnimation { target: dial; property: "shown"; to: 0; duration: 650; easing.type: Easing.OutCubic }
+      NumberAnimation { target: dial; property: "shown"; to: dial.fullScale; duration: Style.duration(550); easing.type: Easing.InOutCubic }
+      NumberAnimation { target: dial; property: "shown"; to: 0; duration: Style.duration(650); easing.type: Easing.OutCubic }
       onFinished: dial.shown = dial.value
     }
 
@@ -373,13 +377,8 @@ PanelWindow {
       Text {
         textFormat: Text.PlainText
         anchors.horizontalCenter: parent.horizontalCenter
-        // Both branches go through the locale: a reading is a measurement, so
-        // its separators follow the system's number conventions rather than the
-        // interface language. toFixed would have hardcoded a dot below 10 while
-        // everything above it was already grouped for the locale.
-        text: dial.reading < 10
-          ? dial.reading.toLocaleString(Qt.locale(), 'f', 1)
-          : Math.round(dial.reading).toLocaleString(Qt.locale(), 'f', 0)
+        // Written in the interface language's decimal separator and digits.
+        text: Commons.I18n.formatNumber(dial.reading, dial.reading < 10 ? 1 : 0)
         color: root.onScrim
         font.family: root.fontFamily
         font.pixelSize: Style.font.display

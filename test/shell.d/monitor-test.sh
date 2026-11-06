@@ -163,20 +163,20 @@ assert(
   'monitor panel scale header shows only when the own screen and its scale are known'
 )
 
-const monitorRowTextMatch = panelQml.match(/text: monitorRow\.display\.name[^\n]*/)
+const monitorRowTextMatch = panelQml.match(/text: \(monitorRow\.display\.focused[\s\S]*?"x" : ""\)/)
 assert(monitorRowTextMatch, 'monitor row name binding exists')
 assert(
   monitorRowTextMatch[0].includes('normalizeScale(monitorRow.display.scale)'),
   'monitor row appends the display scale'
 )
 assert(
-  monitorRowTextMatch[0].includes('monitorRow.display.focused ? " · focused" : ""'),
-  'monitor row keeps the focused suffix'
+  monitorRowTextMatch[0].includes('Commons.I18n.t("monitor.displayFocused").arg(monitorRow.display.name)'),
+  'monitor row marks the focused display through the catalog'
 )
 assert(
-  monitorRowTextMatch[0].indexOf('normalizeScale(monitorRow.display.scale)') <
-    monitorRowTextMatch[0].indexOf('" · focused"'),
-  'monitor row renders name, scale, then focused'
+  monitorRowTextMatch[0].indexOf('monitorRow.display.name') <
+    monitorRowTextMatch[0].indexOf('normalizeScale(monitorRow.display.scale)'),
+  'monitor row renders the name before the scale suffix'
 )
 
 assert(

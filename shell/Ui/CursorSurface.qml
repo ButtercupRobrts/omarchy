@@ -37,6 +37,6 @@ BorderSurface {
         : Border.none()))
 
   Behavior on color {
-    ColorAnimation { duration: 60 }
+    ColorAnimation { duration: Style.duration(60) }
   }
 }

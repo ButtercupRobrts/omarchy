@@ -30,6 +30,9 @@ Item {
 
   property bool checked: false
   property bool busy: false
+  // The knob is placed by x, so a mirrored (right-to-left) layout throws it
+  // toward the left when on.
+  readonly property bool mirrored: LayoutMirroring.enabled
 
   // Off when the surrounding row owns the click, as in `Toggle`.
   property bool interactive: true
@@ -85,18 +88,18 @@ Item {
       : Style.normalFillFor(root.foreground, root.accent)
     borderSpec: Border.controlSpec(root.checked ? "selected" : "normal", root.foreground, root.accent)
 
-    Behavior on color { ColorAnimation { duration: 120 } }
+    Behavior on color { ColorAnimation { duration: Style.duration(120) } }
 
     Rectangle {
       width: root.knobSize
       height: root.knobSize
       radius: root.rounded ? height / 2 : 0
-      x: root.checked ? track.width - width - root.knobInset : root.knobInset
+      x: root.checked !== root.mirrored ? track.width - width - root.knobInset : root.knobInset
       anchors.verticalCenter: parent.verticalCenter
       color: root.checked ? Style.selectedStateColor(root.foreground, root.accent) : Qt.darker(root.foreground, 1.25)
 
-      Behavior on x { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
-      Behavior on color { ColorAnimation { duration: 120 } }
+      Behavior on x { NumberAnimation { duration: Style.duration(120); easing.type: Easing.OutCubic } }
+      Behavior on color { ColorAnimation { duration: Style.duration(120) } }
     }
   }
 
