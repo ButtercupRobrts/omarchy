@@ -15,7 +15,14 @@ export OMARCHY_PATH="${OMARCHY_PATH:-$(cd -- "$(dirname -- "$SCRIPT_PATH")/.." &
 # Make sure the Omarchy bin and yt-dlp are reachable when launched by the browser.
 export PATH="$OMARCHY_PATH/bin:/usr/local/bin:/usr/bin:$PATH"
 
+YTDLP="${OMARCHY_YTDLP:-yt-dlp}"
 DOWNLOAD_DIR="${OMARCHY_YTDLP_DIR:-$HOME/Videos}"
+
+# Browser cookie stores to try when a site only serves video to a logged-in
+# session (Vimeo, Instagram, X). The explicit +gnomekeyring is required because
+# auto-detection picks "basictext" under Hyprland and leaves v11 cookies
+# undecryptable.
+COOKIE_BROWSERS=("brave+gnomekeyring" "chromium+gnomekeyring" "chrome+gnomekeyring")
 
 parse_url() {
   jq -r '.url // empty' 2>/dev/null <<<"$1" || true
@@ -85,52 +92,68 @@ download_url() {
 
   mkdir -p "$DOWNLOAD_DIR"
 
-  # Don't show anything until yt-dlp confirms there's actually a video to grab.
-  if ! yt-dlp --no-playlist --simulate --quiet --no-warnings --no-exec --no-exec-before-download -- "$url" >/dev/null 2>&1; then
+  # Try each session in turn: anonymous first, then each browser's cookie
+  # store. Sites that wall their video API behind login fail the anonymous
+  # probe, and a store that probes clean can still 403 on the real fetch
+  # (YouTube picks formats per session), so a failed download falls through
+  # to the next candidate too.
+  local -a cookie_args=()
+  local cookie_browser probed="" line pct intpct last er nowms lastms=0 title="" filepath="" resolved
+  for cookie_browser in "" "${COOKIE_BROWSERS[@]}"; do
+    if [[ -n $cookie_browser ]]; then
+      cookie_args=(--cookies-from-browser "$cookie_browser")
+    fi
+    "$YTDLP" "${cookie_args[@]}" --no-playlist --simulate --quiet --no-warnings \
+      --no-exec --no-exec-before-download -- "$url" >/dev/null 2>&1 || continue
+    probed=1
+
+    osd_progress 0
+
+    # Stream the download: OMARCHY_PROG carries the percent (drives the OSD), and
+    # OMARCHY_FILE and OMARCHY_TITLE (printed only after a successful move) carry the
+    # path and the title. The title is JSON-encoded so metadata cannot forge a record,
+    # and the file is named after it: yt-dlp strips control characters from a filename
+    # with or without --restrict-filenames, so a record is still only ever one line.
+    last="" lastms=0 title="" filepath=""
+    while IFS= read -r line; do
+      case $line in
+      OMARCHY_PROG*)
+        pct=${line#OMARCHY_PROG$'\t'}
+        intpct=${pct%%.*}
+        intpct=${intpct//[^0-9]/}
+        [[ -n $intpct && $intpct != "$last" ]] || continue # skip no-op repeats
+        # Throttle to ~4 redraws/sec so fast downloads don't spawn a flurry of processes.
+        er=$EPOCHREALTIME
+        nowms=$((${er%[.,]*} * 1000 + 10#${er##*[.,]} / 1000))
+        ((nowms - lastms >= 250)) || continue
+        last=$intpct
+        lastms=$nowms
+        osd_progress "$intpct"
+        ;;
+      OMARCHY_FILE*)
+        resolved=$(resolve_download_file "${line#OMARCHY_FILE$'\t'}") || continue
+        filepath=$resolved
+        ;;
+      OMARCHY_TITLE*)
+        title=$(decode_title "${line#OMARCHY_TITLE$'\t'}") || title=""
+        ;;
+      esac
+    done < <(PYTHONUNBUFFERED=1 "$YTDLP" "${cookie_args[@]}" --no-playlist --no-simulate \
+      --quiet --no-warnings --no-exec --no-exec-before-download --progress --newline \
+      --progress-template $'download:OMARCHY_PROG\t%(progress._percent_str)s' \
+      --paths "$DOWNLOAD_DIR" -o '%(title)s.%(ext)s' \
+      --print $'after_move:OMARCHY_FILE\t%(filepath)s' \
+      --print $'after_move:OMARCHY_TITLE\t%(title)j' \
+      -- "$url" 2>&1)
+
+    osd_close
+    [[ -n $filepath ]] && break
+  done
+
+  if [[ -z $probed ]]; then
     omarchy-notification-send -u critical -g 󰅖 "No video found for download" "$url"
     exit 0
   fi
-
-  osd_progress 0
-
-  # Stream the download: OMARCHY_PROG carries the percent (drives the OSD), and
-  # OMARCHY_FILE and OMARCHY_TITLE (printed only after a successful move) carry the
-  # path and the title. The title is JSON-encoded so metadata cannot forge a record,
-  # and the file is named after it: yt-dlp strips control characters from a filename
-  # with or without --restrict-filenames, so a record is still only ever one line.
-  local line pct intpct last="" er nowms lastms=0 title="" filepath="" resolved
-  while IFS= read -r line; do
-    case $line in
-    OMARCHY_PROG*)
-      pct=${line#OMARCHY_PROG$'\t'}
-      intpct=${pct%%.*}
-      intpct=${intpct//[^0-9]/}
-      [[ -n $intpct && $intpct != "$last" ]] || continue # skip no-op repeats
-      # Throttle to ~4 redraws/sec so fast downloads don't spawn a flurry of processes.
-      er=$EPOCHREALTIME
-      nowms=$((${er%[.,]*} * 1000 + 10#${er##*[.,]} / 1000))
-      ((nowms - lastms >= 250)) || continue
-      last=$intpct
-      lastms=$nowms
-      osd_progress "$intpct"
-      ;;
-    OMARCHY_FILE*)
-      resolved=$(resolve_download_file "${line#OMARCHY_FILE$'\t'}") || continue
-      filepath=$resolved
-      ;;
-    OMARCHY_TITLE*)
-      title=$(decode_title "${line#OMARCHY_TITLE$'\t'}") || title=""
-      ;;
-    esac
-  done < <(PYTHONUNBUFFERED=1 yt-dlp --no-playlist --no-simulate \
-    --quiet --no-warnings --no-exec --no-exec-before-download --progress --newline \
-    --progress-template $'download:OMARCHY_PROG\t%(progress._percent_str)s' \
-    --paths "$DOWNLOAD_DIR" -o '%(title)s.%(ext)s' \
-    --print $'after_move:OMARCHY_FILE\t%(filepath)s' \
-    --print $'after_move:OMARCHY_TITLE\t%(title)j' \
-    -- "$url" 2>&1)
-
-  osd_close
 
   # after_move only prints on a successful download+move, so a captured path == success.
   if [[ -n $filepath ]]; then
